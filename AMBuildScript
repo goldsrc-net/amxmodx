@@ -22,6 +22,7 @@ class AMXXConfig(object):
     self.stdcxx_path = None
     self.nasm_path = None
     self.target_arch = 'i386'
+    self.asmjit = None
 
   def detectTargetArch(self):
     arch = (getattr(builder.options, 'target_arch', '') or '').lower()
@@ -215,6 +216,7 @@ class AMXXConfig(object):
       '-pipe',
       '-fno-strict-aliasing',
       '-Wall',
+      '-Werror',
       '-Wno-uninitialized',
       '-Wno-unused',
       '-Wno-switch',
@@ -224,23 +226,13 @@ class AMXXConfig(object):
     if self.target_arch == 'i386':
       cxx.cflags += ['-m32']
       cxx.linkflags += ['-m32']
-      cxx.cflags += ['-Werror']
     elif self.target_arch == 'amd64':
       cxx.cflags += ['-m64']
       cxx.linkflags += ['-m64']
-    # aarch64: arch is determined by the toolchain prefix (e.g. CC=aarch64-linux-gnu-gcc);
-    # no -m flag.
-
-    # On 64-bit builds the AMX VM and friends pack native pointers into
-    # 32-bit cells in many places (debugger, JUMPABS-style relocation,
-    # native gateway book-keeping). A complete audit/refactor is Phase 4
-    # work; until then, drop -Werror on 64-bit and run -fpermissive so
-    # narrowing pointer<->int casts compile as warnings. Affects mostly
-    # debug/trace paths at runtime.
-    if self.target_arch in ('amd64', 'aarch64'):
-      cxx.cxxflags += ['-fpermissive']
-      # 64-bit shared objects need PIC; ld errors with R_X86_64_PC32
-      # relocations otherwise (Metamod-R hit identically).
+      cxx.cflags += ['-fPIC']
+    elif self.target_arch == 'aarch64':
+      # arch is determined by the toolchain prefix (e.g. CC=aarch64-linux-gnu-gcc);
+      # no -m flag.
       cxx.cflags += ['-fPIC']
     cxx.cxxflags += [
       '-Wno-invalid-offsetof',
@@ -525,19 +517,16 @@ AMXX.utf8rewind = builder.RunScript(
   'third_party/utf8rewind/AMBuilder'
 )
 
+AMXX.asmjit = builder.RunScript(
+  'support/asmjit/AMBuilder',
+  { 'AMXX': AMXX }
+)
+
 core_scripts = [
   'amxmodx/AMBuilder',
+  'compiler/amxxpc/AMBuilder',
+  'compiler/libpc300/AMBuilder',
 ]
-# The Pawn compiler (amxxpc + libpc300) is a developer tool, not a
-# runtime artifact. It contains 32-bit-cell-VM int-to-pointer casts
-# that need a separate cleanup before it can build 64-bit; until that
-# happens, build it only on i386 so cross-arch development still has a
-# working compiler on traditional dev hosts.
-if AMXX.target_arch == 'i386':
-  core_scripts += [
-    'compiler/amxxpc/AMBuilder',
-    'compiler/libpc300/AMBuilder',
-  ]
 
 module_scripts = [
   'modules/cstrike/cstrike/AMBuilder',
@@ -553,17 +542,13 @@ module_scripts = [
   'modules/mysqlx/AMBuilder',
   'modules/ns/AMBuilder',
   'modules/nvault/AMBuilder',
+  'modules/regex/AMBuilder',
   'modules/sockets/AMBuilder',
   'modules/sqlite/AMBuilder',
   'modules/tfcx/AMBuilder',
   'modules/ts/tsfun/AMBuilder',
   'modules/ts/tsx/AMBuilder',
 ]
-# regex links a prebuilt libpcre.a that ships only as i386 in
-# modules/regex/lib_linux/. Until per-arch PCRE statics exist (rebuild
-# from tools/pcre/), exclude on non-i386.
-if AMXX.target_arch == 'i386':
-  module_scripts.append('modules/regex/AMBuilder')
 
 builder.RunBuildScripts(core_scripts + module_scripts, { 'AMXX': AMXX })
 
@@ -572,11 +557,10 @@ if builder.target_platform == 'windows':
   builder.RunScript('modules/cstrike/csx/WinCSX/AMBuilder', { 'AMXX': AMXX })
 
 if builder.backend == 'amb2':
-  packaging_scripts = []
-  # Plugins compile via amxxpc/libpc300; skip on arches where the compiler
-  # isn't built (see core_scripts gate above).
-  if AMXX.target_arch == 'i386':
-    packaging_scripts.append('plugins/AMBuilder')
-  packaging_scripts.append('support/PackageScript')
-  builder.RunBuildScripts(packaging_scripts, { 'AMXX': AMXX })
+  builder.RunBuildScripts([
+      'plugins/AMBuilder',
+      'support/PackageScript',
+    ],
+    { 'AMXX': AMXX }
+  )
 

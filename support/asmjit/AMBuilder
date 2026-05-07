@@ -1,0 +1,52 @@
+# vim: sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Builds AsmJit (vendored at extern/asmjit/) as a static library, slimmed
+# to the target arch. Lives in support/asmjit/ so the submodule itself
+# stays pristine.
+#
+# Mirrors Metamod-R's CMake setup: ASMJIT_NO_AARCH64 on x86 targets,
+# ASMJIT_NO_X86 on aarch64. Public consumers add this lib to their
+# compiler.linkflags via AMXX.asmjit.binary.
+import os
+import glob
+
+lib = builder.compiler.StaticLibrary('asmjit')
+
+ASMJIT_ROOT = os.path.join(builder.sourcePath, 'extern', 'asmjit')
+ASMJIT_SRC  = os.path.join(ASMJIT_ROOT, 'asmjit')
+
+lib.compiler.includes += [
+  ASMJIT_ROOT,
+  os.path.join(ASMJIT_ROOT, 'asmjit'),
+]
+
+# AsmJit needs C++17 minimum. Drop the project-wide C++11 std flag and
+# replace with C++17 just for this lib.
+lib.compiler.cxxflags = [
+  f for f in lib.compiler.cxxflags if not f.startswith('-std=')
+] + ['-std=c++17']
+
+# AsmJit is third-party; don't make its warnings build-fatal.
+lib.compiler.cflags = [
+  f for f in lib.compiler.cflags if f != '-Werror'
+]
+
+lib.compiler.defines += [
+  'ASMJIT_STATIC',
+]
+
+sources_core    = sorted(glob.glob(os.path.join(ASMJIT_SRC, 'core',    '*.cpp')))
+sources_support = sorted(glob.glob(os.path.join(ASMJIT_SRC, 'support', '*.cpp')))
+sources_x86     = sorted(glob.glob(os.path.join(ASMJIT_SRC, 'x86',     '*.cpp')))
+sources_arm     = sorted(glob.glob(os.path.join(ASMJIT_SRC, 'arm',     '*.cpp')))
+sources_ujit    = sorted(glob.glob(os.path.join(ASMJIT_SRC, 'ujit',    '*.cpp')))
+
+if AMXX.target_arch in ('i386', 'amd64'):
+  lib.compiler.defines += ['ASMJIT_NO_AARCH64']
+  lib.sources += sources_core + sources_support + sources_x86
+  lib.sources += [s for s in sources_ujit if s.endswith('_x86.cpp') or s.endswith('vecconsttable.cpp')]
+elif AMXX.target_arch == 'aarch64':
+  lib.compiler.defines += ['ASMJIT_NO_X86']
+  lib.sources += sources_core + sources_support + sources_arm
+  lib.sources += [s for s in sources_ujit if s.endswith('_a64.cpp') or s.endswith('vecconsttable.cpp')]
+
+rvalue = builder.Add(lib)

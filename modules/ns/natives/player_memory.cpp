@@ -334,7 +334,7 @@ static cell AMX_NATIVE_CALL ns_remove_upgrade(AMX *amx, cell *params)
 		int *end;
 		int *allocated;
 
-		inline int size() { return static_cast<int>((reinterpret_cast<unsigned int>(end) - reinterpret_cast<unsigned int>(start)) / sizeof(int)); }
+		inline int size() { return static_cast<int>(end - start); }
 		inline int at(int which) { return start[which]; }
 		inline void set(int which, int val) { start[which] = val; }
 		inline bool remove(int val)
