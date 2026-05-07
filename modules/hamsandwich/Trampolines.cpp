@@ -111,16 +111,32 @@ namespace
 		return TypeId::kVoid;
 	}
 
-	// Append `this` then each named param (Vector expanded as 3 floats)
-	// to a FuncSignature being built.
+	// Append `this` then each named param to a FuncSignature being built.
+	//
+	// Vector (HL SDK 3-float struct) classification per arch:
+	//   i386:    3 packed Float stack slots (everything is 4-byte stack on
+	//            x86 cdecl/thiscall; the compiler lays them out adjacent).
+	//   aarch64: HFA-3 → V0..V2 each holding one float. Expanding as 3
+	//            successive Float args lands in V0/V1/V2 exactly per AAPCS64.
+	//   amd64:   SysV classifies the 12-byte struct as two eightbytes —
+	//            bytes 0-7 (two floats) → XMM-N as packed Float32x2;
+	//            bytes 8-11 (one float) → XMM-(N+1) as Float32. AsmJit's
+	//            TypeId::kFloat32x2 occupies the low 64 bits of an XMM
+	//            register, matching what the C compiler emits for `Vector`
+	//            by value.
 	void append_args(FuncSignature& sig, const HamSig::HookSignature& hs)
 	{
 		sig.add_arg(TypeId::kIntPtr);	// 'this'
 		for (uint8_t i = 0; i < hs.paramCount; ++i) {
 			if (hs.params[i] == HamSig::ParamKind::Vector) {
+#if defined(__x86_64__)
+				sig.add_arg(TypeId::kFloat32x2);
+				sig.add_arg(TypeId::kFloat32);
+#else
 				sig.add_arg(TypeId::kFloat32);
 				sig.add_arg(TypeId::kFloat32);
 				sig.add_arg(TypeId::kFloat32);
+#endif
 			} else {
 				sig.add_arg(param_type_id(hs.params[i]));
 			}
@@ -171,6 +187,12 @@ namespace
 	{
 		if (tid == TypeId::kFloat32 || tid == TypeId::kFloat64)
 			return new_float_vreg(cc);
+#if defined(__x86_64__)
+		if (tid == TypeId::kFloat32x2) {
+			// 2-float packed vector — full XMM (low 64 bits used by SysV).
+			return cc.new_xmm();
+		}
+#endif
 		return cc.new_gp_ptr();
 	}
 }	// namespace
