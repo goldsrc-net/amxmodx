@@ -12,6 +12,29 @@
 #include <stddef.h>   // size_t
 #include <extdll.h>   // edict_t, etc.
 #include <sdk_util.h> // FNullEnt, INDEXENT, etc.
+#include "AMXModulePtrHandle.h"
+
+// Cell-sized handle table for HL pdata pointer/class field reads.
+// PAWN_CELL_SIZE=32 cannot hold a native pointer on 64-bit hosts;
+// FIELD_POINTER / FIELD_CLASS / FIELD_STRUCTURE pdata reads go
+// through this table. Plugin-visible cell is a 1-based index;
+// nullptr always maps to 0 so the existing null-comparison idiom
+// (cell == 0) keeps working.
+inline PtrHandleTable<void> &g_hl_pdata_handles()
+{
+    static PtrHandleTable<void> tbl;
+    return tbl;
+}
+
+inline cell pdata_pointer_to_cell(const void *p)
+{
+    return g_hl_pdata_handles().find_or_alloc(const_cast<void *>(p));
+}
+
+inline void *pdata_cell_to_pointer(cell handle)
+{
+    return g_hl_pdata_handles().get(handle);
+}
 
 template <typename T> static inline T& ref_pdata(void *pPrivateData, int offset, int element = 0)
 {
@@ -22,6 +45,15 @@ template <typename T> static inline T& ref_pdata(void *pPrivateData, int offset,
 template <typename T> inline T get_pdata_direct(void *pPrivateData, int offset, int element = 0, int size = 0)
 {
 	return reinterpret_cast<T>(reinterpret_cast<int8*>(pPrivateData) + offset + (element * size));
+}
+
+// Specialization for `cell`: return a handle into the pdata-pointer
+// table rather than a truncated address. Required for FIELD_CLASS /
+// FIELD_STRUCTURE on 64-bit.
+template <> inline cell get_pdata_direct<cell>(void *pPrivateData, int offset, int element, int size)
+{
+	void *addr = reinterpret_cast<int8*>(pPrivateData) + offset + (element * size);
+	return pdata_pointer_to_cell(addr);
 }
 
 template <typename T> inline T get_pdata_direct(edict_t *pEntity, int offset, int element = 0, int size = 0)

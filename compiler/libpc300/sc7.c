@@ -466,8 +466,10 @@ static char *replacesequence(const char *pattern,char symbols[MAX_OPT_VARS][MAX_
   } /* while */
 
   /* allocate a buffer to replace the sequence in */
-  if ((buffer=(char*)malloc(*repl_length))==NULL)
-    return (char*)error(103);
+  if ((buffer=(char*)malloc(*repl_length))==NULL) {
+    error(103);
+    return NULL;
+  }
 
   /* replace the pattern into this temporary buffer */
   char *ptr=buffer;

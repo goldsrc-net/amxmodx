@@ -96,7 +96,7 @@ public:
 			case FieldType::FIELD_POINTER:
 			case FieldType::FIELD_FUNCTION:
 			{
-				return reinterpret_cast<cell>(get_pdata<void*>(pObject, data.fieldOffset, element));
+				return pdata_pointer_to_cell(get_pdata<void*>(pObject, data.fieldOffset, element));
 			}
 			case FieldType::FIELD_SHORT:
 			{
@@ -148,7 +148,7 @@ public:
 			case FieldType::FIELD_POINTER:
 			case FieldType::FIELD_FUNCTION:
 			{
-				set_pdata<void*>(pObject, data.fieldOffset, reinterpret_cast<void*>(value), element);
+				set_pdata<void*>(pObject, data.fieldOffset, pdata_cell_to_pointer(value), element);
 				break;
 			}
 			case FieldType::FIELD_SHORT:

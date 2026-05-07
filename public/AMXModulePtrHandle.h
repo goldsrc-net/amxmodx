@@ -29,7 +29,10 @@
 
 #include <stddef.h>
 #include <amtl/am-vector.h>
-#include "amxxmodule.h"
+
+// `cell` is the AMX Pawn cell type. Caller must have included a
+// cell-defining header (amxxmodule.h in modules, amx.h in the amxmodx
+// core) before pulling this in.
 
 template <typename T>
 class PtrHandleTable
