@@ -14,6 +14,8 @@
 #ifndef HOOKLIST_T_H
 #define HOOKLIST_T_H
 
+#include "HookSignature.h"
+
 typedef struct hook_s
 {
 	int isset;								// whether or not this hook is registered with hamdata
@@ -26,6 +28,7 @@ typedef struct hook_s
 	void *targetfunc;						// the target hook
 	int (*makefunc)(AMX *, const char*);	// function that creates forwards
 	cell (*call)(AMX *, cell*);				// function to call the vcall
+	const HamSig::HookSignature *sig;		// per-hook ABI descriptor for the AsmJit trampoline emitter
 } hook_t;
 
 extern hook_t hooklist[];

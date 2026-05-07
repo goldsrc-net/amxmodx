@@ -37,8 +37,8 @@ bool gDoForwards=true;
 ke::Vector<Hook *> hooks[HAM_LAST_ENTRY_DONT_USE_ME_LOL];
 CHamSpecialBotHandler SpecialbotHandler;
 
-#define V(__KEYNAME, __STUFF__) 0, 0, __KEYNAME, false, RT_##__STUFF__, RB_##__STUFF__, PC_##__STUFF__, reinterpret_cast<void *>(Hook_##__STUFF__), Create_##__STUFF__, Call_##__STUFF__
-#define V_REMOVED(__KEYNAME) 0, 0, __KEYNAME, true, RT_Void_Void, RB_Void_Void, PC_Void_Void, nullptr, 0, 0
+#define V(__KEYNAME, __STUFF__) 0, 0, __KEYNAME, false, RT_##__STUFF__, RB_##__STUFF__, PC_##__STUFF__, reinterpret_cast<void *>(Hook_##__STUFF__), Create_##__STUFF__, Call_##__STUFF__, &Sig_##__STUFF__
+#define V_REMOVED(__KEYNAME) 0, 0, __KEYNAME, true, RT_Void_Void, RB_Void_Void, PC_Void_Void, nullptr, 0, 0, nullptr
 
 hook_t hooklist[] =
 {
