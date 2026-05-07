@@ -491,7 +491,14 @@ int AMXAPI amx_Callback(AMX *amx, cell index, cell *result, cell *params)
   extern "C" int AMXAPI asm_runJIT(void *sourceAMXbase, void *jumparray, void *compiledAMXbase);
 #endif
 
-#if PAWN_CELL_SIZE==16
+#if PAWN_CELL_SIZE==16 || (defined(__SIZEOF_POINTER__) ? __SIZEOF_POINTER__ : 4) > (PAWN_CELL_SIZE / 8)
+  /* Cells too narrow to hold a native pointer (16-bit cells, or 32-bit
+   * cells on 64-bit hosts). Skip the relocate-to-absolute pass; jump
+   * targets stay as code-relative offsets in the bytecode and JUMPABS
+   * resolves base+offset on the fly. The labels-as-values dispatcher
+   * is gated off on the same condition, so only the switch dispatcher
+   * uses these and JUMPABS still returns a real cell* pointer.
+   */
   #define JUMPABS(base,ip)      ((cell *)((base) + *(ip)))
   #define RELOC_ABS(base, off)
   #define RELOC_VALUE(base, v)
@@ -1626,9 +1633,13 @@ int AMXAPI amx_PushString(AMX *amx, cell *amx_addr, cell **phys_addr, const char
 #define SKIPPARAM(n)    ( cip=(cell *)cip+(n) )
 #define PUSH(v)         ( stk-=sizeof(cell), *(cell *)(data+(int)stk)=v )
 #define POP(v)          ( v=*(cell *)(data+(int)stk), stk+=sizeof(cell) )
+/* cip is saved as a code-relative offset to match every other amx->cip
+ * write site (and amx_Exec's restore at AMX_EXEC_CONT, which does
+ * code + (int)amx->cip). Storing the absolute pointer would silently
+ * truncate on 64-bit hosts where sizeof(void*) > sizeof(cell). */
 #define ABORT(amx,v)    { (amx)->stk=reset_stk; \
 						  (amx)->hea=reset_hea; \
-						  (amx)->cip=(cell)cip; \
+						  (amx)->cip=(cell)((unsigned char *)cip - code); \
 						  (amx)->pri=pri; \
 						  (amx)->alt=alt; \
 						  return v; \
@@ -3513,7 +3524,11 @@ int AMXAPI amx_Exec(AMX *amx, cell *retval, int index)
       amx->stk=stk;
       amx->pri=pri;
       amx->alt=alt;
-      pri=((AMX_NATIVE)offs)(amx,(cell *)(data+(int)stk));
+      /* Dead path on 64-bit: amx_BrowseRelocate gates SYSREQ.D enablement on
+       * sizeof(AMX_NATIVE) <= sizeof(cell), so a 32-bit cell can never
+       * receive a 64-bit native pointer here. Cast through uintptr_t so the
+       * unreachable branch still type-checks. */
+      pri=((AMX_NATIVE)(uintptr_t)offs)(amx,(cell *)(data+(int)stk));
       if (amx->error!=AMX_ERR_NONE) {
         if (amx->error==AMX_ERR_SLEEP) {
           amx->pri=pri;

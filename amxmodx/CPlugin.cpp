@@ -388,7 +388,7 @@ static cell AMX_NATIVE_CALL invalid_native(AMX *amx, cell *params)
 	//1 - because we're trapping usage
 	if (!pHandler->HandleNative(name, native, 1))
 	{
-		amx->usertags[UT_NATIVE] = (void *)native;
+		amx->usertags[UT_NATIVE] = (void *)(intptr_t)native;
 		LogError(amx, AMX_ERR_INVNATIVE, NULL);
 		return 0;
 	}

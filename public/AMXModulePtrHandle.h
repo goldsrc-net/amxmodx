@@ -28,11 +28,30 @@
 #define _AMXMODX_PTR_HANDLE_H_
 
 #include <stddef.h>
+#include <stdint.h>
 #include <amtl/am-vector.h>
 
-// `cell` is the AMX Pawn cell type. Caller must have included a
-// cell-defining header (amxxmodule.h in modules, amx.h in the amxmodx
-// core) before pulling this in.
+// `cell` is the AMX Pawn cell type. We forward-declare it here keyed off
+// PAWN_CELL_SIZE so consumers don't have to remember to include amx.h
+// or amxxmodule.h before pulling this header in. Both of those headers
+// also typedef `cell` and `ucell` to identical types, and C++ allows
+// redundant typedefs to the same underlying type, so include order
+// doesn't matter.
+#ifndef PAWN_CELL_SIZE
+#  define PAWN_CELL_SIZE 32
+#endif
+#if PAWN_CELL_SIZE == 16
+typedef int16_t  cell;
+typedef uint16_t ucell;
+#elif PAWN_CELL_SIZE == 32
+typedef int32_t  cell;
+typedef uint32_t ucell;
+#elif PAWN_CELL_SIZE == 64
+typedef int64_t  cell;
+typedef uint64_t ucell;
+#else
+#  error "PAWN_CELL_SIZE must be 16, 32, or 64"
+#endif
 
 template <typename T>
 class PtrHandleTable

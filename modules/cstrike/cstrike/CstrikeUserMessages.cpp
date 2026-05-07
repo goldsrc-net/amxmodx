@@ -11,6 +11,9 @@
 // Counter-Strike Module
 //
 
+// amxxmodule.h must precede CstrikeUtils.h: the latter pulls in
+// HLTypeConversion.h -> AMXModulePtrHandle.h, which uses `cell`.
+#include <amxxmodule.h>
 #include "CstrikeUserMessages.h"
 #include "CstrikeUtils.h"
 #include "CstrikeHacks.h"
