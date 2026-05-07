@@ -132,6 +132,14 @@ const HS::HookSignature Sig_Void_Vector_Vector                                 =
 const HS::HookSignature Sig_Void_Void                                          = { RV,  0, {} };
 const HS::HookSignature Sig_Void_pFloat_pFloat                                 = { RV,  2, { P, P } };
 
+// Hook_Deprecated is a no-op dispatcher (Hook* hook only) used as the target
+// for hooks that exist in the registry but are absent in some mods (e.g.
+// ts_respawnwait). The trampoline reuses Sig_Void_Void's shape — extra
+// register/stack args from the engine call are tolerated since the
+// dispatcher reads only the prepended Hook* and discards the rest, and
+// every supported ABI here is caller-cleanup for the relevant args.
+const HS::HookSignature Sig_Deprecated                                         = { RV,  0, {} };
+
 #undef I
 #undef F
 #undef P

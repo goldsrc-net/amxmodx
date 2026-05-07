@@ -28,6 +28,7 @@
 #include "hooklist.h"
 #include "ham_utils.h"
 #include "hook_specialbot.h"
+#include "ham_handles.h"
 #include <amtl/am-vector.h>
 
 OffsetManager Offsets;
@@ -36,6 +37,7 @@ bool gDoForwards=true;
 
 ke::Vector<Hook *> hooks[HAM_LAST_ENTRY_DONT_USE_ME_LOL];
 CHamSpecialBotHandler SpecialbotHandler;
+PtrHandleTable<void> g_ham_ptr_handles;
 
 #define V(__KEYNAME, __STUFF__) 0, 0, __KEYNAME, false, RT_##__STUFF__, RB_##__STUFF__, PC_##__STUFF__, reinterpret_cast<void *>(Hook_##__STUFF__), Create_##__STUFF__, Call_##__STUFF__, &Sig_##__STUFF__
 #define V_REMOVED(__KEYNAME) 0, 0, __KEYNAME, true, RT_Void_Void, RB_Void_Void, PC_Void_Void, nullptr, 0, 0, nullptr
@@ -676,12 +678,12 @@ static cell AMX_NATIVE_CALL RegisterHam(AMX *amx, cell *params)
 			{
 				hooks[func].at(i)->pre.append(pfwd);
 			}
-			return reinterpret_cast<cell>(pfwd);
+			return ham_ptr_to_cell(pfwd);
 		}
 	}
 
 	// If we got here, the function is not hooked
-	Hook *hook = new Hook(vtable, hooklist[func].vtid, hooklist[func].targetfunc, hooklist[func].isvoid, hooklist[func].needsretbuf, hooklist[func].paramcount, classname.chars());
+	Hook *hook = new Hook(vtable, hooklist[func].vtid, hooklist[func].targetfunc, *hooklist[func].sig, classname.chars());
 	hooks[func].append(hook);
 
 	if (post)
@@ -693,7 +695,7 @@ static cell AMX_NATIVE_CALL RegisterHam(AMX *amx, cell *params)
 		hook->pre.append(pfwd);
 	}
 
-	return reinterpret_cast<cell>(pfwd);
+	return ham_ptr_to_cell(pfwd);
 }
 // RegisterHamFromEntity(Ham:function, EntityId, const Callback[], Post=0);
 static cell AMX_NATIVE_CALL RegisterHamFromEntity(AMX *amx, cell *params)
@@ -763,7 +765,7 @@ static cell AMX_NATIVE_CALL RegisterHamFromEntity(AMX *amx, cell *params)
 			{
 				hooks[func].at(i)->pre.append(pfwd);
 			}
-			return reinterpret_cast<cell>(pfwd);
+			return ham_ptr_to_cell(pfwd);
 		}
 	}
 
@@ -774,7 +776,7 @@ static cell AMX_NATIVE_CALL RegisterHamFromEntity(AMX *amx, cell *params)
 	ke::SafeSprintf(classname, sizeof(classname), "%s", STRING(Entity->v.classname));
 
 	// If we got here, the function is not hooked
-	Hook *hook = new Hook(vtable, hooklist[func].vtid, hooklist[func].targetfunc, hooklist[func].isvoid, hooklist[func].needsretbuf, hooklist[func].paramcount, classname);
+	Hook *hook = new Hook(vtable, hooklist[func].vtid, hooklist[func].targetfunc, *hooklist[func].sig, classname);
 	hooks[func].append(hook);
 
 	if (post)
@@ -786,7 +788,7 @@ static cell AMX_NATIVE_CALL RegisterHamFromEntity(AMX *amx, cell *params)
 		hook->pre.append(pfwd);
 	}
 
-	return reinterpret_cast<cell>(pfwd);
+	return ham_ptr_to_cell(pfwd);
 }
 static cell AMX_NATIVE_CALL ExecuteHam(AMX *amx, cell *params)
 {
@@ -823,7 +825,7 @@ static cell AMX_NATIVE_CALL IsHamValid(AMX *amx, cell *params)
 
 static cell AMX_NATIVE_CALL DisableHamForward(AMX *amx, cell *params)
 {
-	Forward *fwd=reinterpret_cast<Forward *>(params[1]);
+	Forward *fwd = ham_cell_to_ptr<Forward>(params[1]);
 
 	if (fwd == 0)
 	{
@@ -836,7 +838,7 @@ static cell AMX_NATIVE_CALL DisableHamForward(AMX *amx, cell *params)
 }
 static cell AMX_NATIVE_CALL EnableHamForward(AMX *amx, cell *params)
 {
-	Forward *fwd=reinterpret_cast<Forward *>(params[1]);
+	Forward *fwd = ham_cell_to_ptr<Forward>(params[1]);
 
 	if (fwd == 0)
 	{

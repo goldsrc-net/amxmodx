@@ -19,6 +19,11 @@
 #include <amtl/am-vector.h>
 #include <amtl/am-string.h>
 
+#if defined(__linux__) || defined(__APPLE__)
+#  include <sys/mman.h>
+#  include <unistd.h>
+#endif
+
 #define ALIGN(ar) ((intptr_t)ar & ~(sysconf(_SC_PAGESIZE)-1))
 
 // This is just a simple container for data so I only have to add 1 extra 
@@ -39,7 +44,7 @@ public:
 	char			*ent;     // ent name that's being hooked
 	int              trampSize;
 
-	Hook(void **vtable_, int entry_, void *target_, bool voidcall, bool retbuf, int paramcount, const char *name) :
+	Hook(void **vtable_, int entry_, void *target_, const HamSig::HookSignature& sig_, const char *name) :
 		func(NULL), vtable(vtable_), entry(entry_), target(target_), exec(0), del(0), tramp(NULL), trampSize(0)
 		{
 			// original function is vtable[entry]
@@ -47,9 +52,9 @@ public:
 			int **ivtable=(int **)vtable;
 			func=(void *)ivtable[entry];
 
-			// now install a trampoline
-			// (int thiscall, int voidcall, int paramcount, void *extraptr)
-			tramp = CreateGenericTrampoline(true, voidcall, retbuf, paramcount, (void*)this, target, &trampSize);
+			// install a trampoline that prepends `this` (the owning Hook*)
+			// before forwarding to `target` (the C dispatcher Hook_<TAG>).
+			tramp = Trampolines::CreateGenericTrampoline(sig_, (void*)this, target, &trampSize);
 
 			// Insert into vtable
 #if defined(_WIN32)
@@ -81,13 +86,7 @@ public:
 #endif
 
 		ivtable[entry]=(int *)func;
-#if defined(_WIN32)
-		VirtualFree(tramp, 0, MEM_RELEASE);
-#elif defined(__linux__)
-		munmap(tramp, trampSize);
-#elif defined(__APPLE__)
-		free(tramp);
-#endif
+		Trampolines::FreeTrampoline(tramp, trampSize);
 
 		delete[] ent;
 

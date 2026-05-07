@@ -20,6 +20,7 @@
 
 #include "ham_const.h"
 #include "ham_utils.h"
+#include "ham_handles.h"
 
 CStack< Data * > ReturnStack;
 CStack< Data * > OrigReturnStack;
@@ -319,7 +320,7 @@ static cell AMX_NATIVE_CALL GetHamItemInfo(AMX *amx, cell *params)
 		return 0;
 	}
 
-	ItemInfo *pItem = reinterpret_cast<ItemInfo *>(params[1]);
+	ItemInfo *pItem = ham_cell_to_ptr<ItemInfo>(params[1]);
 
 	switch (type)
 	{
@@ -379,18 +380,19 @@ static cell AMX_NATIVE_CALL CreateHamItemInfo(AMX *amx, cell *params)
 
 	memset(ii, 0, sizeof(ItemInfo));
 
-	return reinterpret_cast<cell>(ii);
+	return ham_ptr_to_cell(ii);
 }
 
 static cell AMX_NATIVE_CALL FreeHamItemInfo(AMX *amx, cell *params)
 {
-	ItemInfo *ii = reinterpret_cast<ItemInfo *>(params[1]);
+	ItemInfo *ii = ham_cell_to_ptr<ItemInfo>(params[1]);
 
 	if (!ii)
 	{
 		return 0;
 	}
 
+	ham_release_handle(params[1]);
 	g_FreeIIs.push(ii);
 
 	return 1;
@@ -405,7 +407,7 @@ static cell AMX_NATIVE_CALL SetHamItemInfo(AMX *amx, cell *params)
 		return 0;
 	}
 
-	ItemInfo *pItem = reinterpret_cast<ItemInfo *>(params[1]);
+	ItemInfo *pItem = ham_cell_to_ptr<ItemInfo>(params[1]);
 	cell *ptr = MF_GetAmxAddr(amx, params[3]);
 	int iLen;
 

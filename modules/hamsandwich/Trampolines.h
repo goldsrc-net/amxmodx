@@ -10,626 +10,266 @@
 //
 // Ham Sandwich Module
 //
+// Trampoline emitter. Builds an executable thunk for each hooked virtual
+// method that prepends the hook's `Hook*` pointer and forwards to a
+// per-signature C dispatcher (Hook_<TAG>) declared in hook_callbacks.h.
+//
+// Win32: header-only legacy x86 byte-table implementation, kept because
+// the msvc12 project doesn't build any .cpp files added under AMBuild.
+// Linux/Mac (every arch): AsmJit-based emitter in Trampolines.cpp.
 
 #ifndef TRAMPOLINES_H
 #define TRAMPOLINES_H
 
-#ifndef NDEBUG
-#define TPRINT(msg)  printf msg
-#else
-#define TPRINT(msg) /* nothing */
-#endif
+#include "HookSignature.h"
 
-#if defined _WIN32
+namespace Trampolines
+{
+	// Build an executable trampoline matching `sig`'s incoming ABI; on
+	// invocation it forwards to `callee` with `extraptr` as the first arg
+	// (typically the owning Hook*), then the original this/args (with
+	// the hidden sret pointer re-positioned for VectorSret returns to
+	// match Linux/Mac sret-style Hook_Vector_<TAG> signatures).
+	//
+	// outSize receives the byte size of the emitted code; required by
+	// FreeTrampoline on Linux (munmap needs the original length).
+	void *CreateGenericTrampoline(const HamSig::HookSignature& sig,
+	                              void *extraptr, void *callee,
+	                              int *outSize);
+
+	// Release a trampoline buffer previously returned by CreateGenericTrampoline.
+	void FreeTrampoline(void *tramp, int size);
+}
+
+#if defined(_WIN32)
+// ---------------------------------------------------------------------------
+// Win32 inline implementation: legacy x86 byte-table emitter wrapped behind
+// the new HookSignature-based API. Preserves the msvc12 build verbatim.
+// ---------------------------------------------------------------------------
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-#endif // WIN32_LEAN_AND_MEAN
+#endif
 #if _MSC_VER >= 1400
 #ifdef offsetof
 #undef offsetof
-#endif // offsetof
-#endif // _MSC_VER >= 1400
+#endif
+#endif
 #include <windows.h>
-#elif defined(__linux__) || defined(__APPLE__)
-#include <sys/mman.h>
-#if defined (__linux__)
-#include <malloc.h>
-#endif
-#endif
-#include <stddef.h> // size_t
-#include <string.h> // memcpy
-#include <stdlib.h> // memalign
+#include <stddef.h>
+#include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 #include <amtl/am-bits.h>
 
 namespace Trampolines
 {
-
-	/**
-	 * List of x86 bytecodes for creating
-	 * basic trampolines at runtime.
-	 * -
-	 * These are defined here so that, should
-	 * the need ever arise, this can be ported
-	 * to other architectures fairly painlessly
-	 */
+namespace WinLegacy
+{
 	namespace Bytecode
 	{
-		/**
-		 * Prologue for a function
-		 */
-		const unsigned char codePrologue[] = {
-			0x55,						// push ebp
-			0x89, 0xE5,					// mov ebp, esp
-		};
-
-		/**
-		 * Align stack on 16 byte boundary
-		 */
-		const unsigned char codeAlignStack16[] = {
-			0x83, 0xE4, 0xF0,				// and esp, 0xFFFFFFF0
-		};
-
-		/**
-		 * Allocate stack space (8-bit) by adding to ESP
-		 */
-		const unsigned char codeAllocStack[] = {
-			0x83, 0xEC, 0xFF,				// sub esp, 0xFF
-		};
-
-		/**
-		 * Offset of codeAllocStack to modify at runtime
-		 * to contain amount of stack space to allocate. 
-		 */
-		const unsigned int codeAllocStackReplace = 2;
-
-		/**
-		 * Takes a paramter from the trampoline's stack
-		 * and pushes it onto the target's stack.
-		 */
-		const unsigned char codePushParam[] = {
-			0xFF, 0x75, 0xFF			// pushl [ebp+0xFF]
-		};
-
-		/**
-		 * Offset of codePushParam to modify at runtime
-		 * that contains the stack offset
-		 */
-		const unsigned int codePushParamReplace = 2;
-
-
-		/**
-		 * Takes the "this" pointer from the trampoline and
-		 * pushes it onto the target's stack.
-		 */
-		const unsigned char codePushThis[] = {
-		#if defined(_WIN32)
-			0x51						// push ecx
-		#elif defined(__linux__) || defined(__APPLE__)
-			0xFF, 0x75, 0x04			// pushl [ebp+0x08h]
-		#endif
-		};
-
-#if defined(__linux__) || defined(__APPLE__)
-		const int codePushThisReplace = 2;
-#endif
-
-		/**
-		 * Pushes a raw number onto the target's stack
-		 */
-		const unsigned char codePushID[] = {
-			0x68, 0xDE, 0xFA, 0xAD, 0xDE	// push	DEADFADEh
-		};
-
-		/**
-		 * Offset of codePushID to modify at runtime
-		 * to contain the number to push
-		 */
-		const unsigned int codePushIDReplace = 1;
-
-		/**
-		 * Call our procedure
-		 */
-		const unsigned char codeCall[] = {
-			0xB8, 0xDE, 0xFA, 0xAD, 0xDE,// mov eax, DEADFADEh
-			0xFF, 0xD0					// call eax
-		};
-
-		/**
-		 * Offset of codeCall to modify at runtime
-		 * to contain the pointer to the function
-		 */
-		const unsigned int codeCallReplace = 1;
-
-		/**
-		 * Adds to ESP, freeing up stack space
-		 */
-		const unsigned char codeFreeStack[] = {
-			0x81, 0xC4, 0xFF, 0xFF, 0xFF, 0xFF// add esp REPLACEME
-		};
-
-		/**
-		 * Offset of codeFreeStack to modify at runtime
-		 * to contain how much data to free
-		 */
-		const unsigned int codeFreeStackReplace = 2;
-
-		/**
-		 * Epilogue of a simple function
-		 */
-		const unsigned char codeEpilogue[] = {
-				0x89, 0xEC,					// mov esp, ebp
-				0x5D,						// pop ebp
-				0xC3						// ret
-		};
-		const unsigned char codeEpilogueN[] = {
-				0x89, 0xEC,					// mov esp, ebp
-				0x5D,						// pop ebp
-				0xC2, 0xCD, 0xAB				// retn 0xABCD
-		};
-		const int codeEpilogueNReplace = 4;
-
-		const unsigned char codeBreakpoint[] = {
-			0xCC							// int 3
-		};
-
+		const unsigned char codePrologue[]      = { 0x55, 0x89, 0xE5 };
+		const unsigned char codeAlignStack16[]  = { 0x83, 0xE4, 0xF0 };
+		const unsigned char codeAllocStack[]    = { 0x83, 0xEC, 0xFF };
+		const unsigned int  codeAllocStackReplace = 2;
+		const unsigned char codePushParam[]     = { 0xFF, 0x75, 0xFF };
+		const unsigned int  codePushParamReplace = 2;
+		const unsigned char codePushThis[]      = { 0x51 };       // push ecx
+		const unsigned char codePushID[]        = { 0x68, 0xDE, 0xFA, 0xAD, 0xDE };
+		const unsigned int  codePushIDReplace   = 1;
+		const unsigned char codeCall[]          = { 0xB8, 0xDE, 0xFA, 0xAD, 0xDE, 0xFF, 0xD0 };
+		const unsigned int  codeCallReplace     = 1;
+		const unsigned char codeFreeStack[]     = { 0x81, 0xC4, 0xFF, 0xFF, 0xFF, 0xFF };
+		const unsigned int  codeFreeStackReplace = 2;
+		const unsigned char codeEpilogueN[]     = { 0x89, 0xEC, 0x5D, 0xC2, 0xCD, 0xAB };
+		const int           codeEpilogueNReplace = 4;
 	}
-
-	/**
-	 * Our actual maker of the trampolines!!@$
-	 * I've no idea why I made this a class and not a namespace
-	 * Oh well!
-	 */
 
 	class TrampolineMaker
 	{
 	private:
-		unsigned char		*m_buffer;			// the actual buffer containing the code
-		int					 m_size;			// size of the buffer
-		int					 m_mystack;			// stack for the trampoline itself
-		int					 m_calledstack;		// stack for the target function
-		int					 m_paramstart;
-		int					 m_thiscall;
-		int					 m_maxsize;
+		unsigned char *m_buffer;
+		int            m_size;
+		int            m_mystack;
+		int            m_calledstack;
+		int            m_paramstart;
+		int            m_maxsize;
 
-		/**
-		 * Adds data to the buffer
-		 * data must be pre-formatted before hand!
-		 */
 		void Append(const unsigned char *src, size_t size)
 		{
-			int orig=m_size;
-			m_size+=size;
+			int orig = m_size;
+			m_size += int(size);
 
-			if (m_buffer==NULL)
-			{
-				m_maxsize=512;
-				m_buffer=(unsigned char *)malloc(m_maxsize);
-			}
-			else if (m_size > m_maxsize)
-			{
+			if (m_buffer == NULL) {
+				m_maxsize = 512;
+				m_buffer = (unsigned char *)malloc(m_maxsize);
+			} else if (m_size > m_maxsize) {
 				m_maxsize = m_size + 512;
-				m_buffer=(unsigned char *)realloc(m_buffer,m_maxsize);
+				m_buffer = (unsigned char *)realloc(m_buffer, m_maxsize);
 			}
 
-			unsigned char *dat=m_buffer+orig; // point dat to the end of the prewritten 
-
-			while (orig<m_size)
-			{
-				*dat++=*src++;
-
+			unsigned char *dat = m_buffer + orig;
+			while (orig < m_size) {
+				*dat++ = *src++;
 				orig++;
-			};
-
-		};
+			}
+		}
 	public:
 		TrampolineMaker()
-		{
-			m_buffer=NULL;
-			m_size=0;
-			m_mystack=0;
-			m_calledstack=0;
-			m_paramstart=0;
-			m_thiscall=0;
-			m_maxsize=0;
-		};
+			: m_buffer(NULL), m_size(0), m_mystack(0), m_calledstack(0),
+			  m_paramstart(0), m_maxsize(0)
+		{}
 
-		/**
-		 * Inserts a breakpoint (int 3) into the trampoline.
-		 */
-		void Breakpoint()
-		{
-			Append(&::Trampolines::Bytecode::codeBreakpoint[0],sizeof(::Trampolines::Bytecode::codeBreakpoint));
-		};
-
-		/**
-		 * Adds the prologue, pushes registers, prepares the stack
-		 */
 		void Prologue()
 		{
-			Append(&::Trampolines::Bytecode::codePrologue[0],sizeof(::Trampolines::Bytecode::codePrologue));
-			m_paramstart=0;
-			m_thiscall=0;
-		};
+			Append(Bytecode::codePrologue, sizeof(Bytecode::codePrologue));
+			m_paramstart = 0;
+		}
 
-		/**
-		 * Flags this trampoline as a thiscall trampoline, and prepares the prologue.
-		 */
-		void ThisPrologue()
-		{
-			this->Prologue();
-			m_thiscall=1;
-		};
-
-		/**
-		 * Epilogue for a function pops registers but does not free any more of the stack!
-		 */
-		void Epilogue()
-		{
-			Append(&::Trampolines::Bytecode::codeEpilogue[0],sizeof(::Trampolines::Bytecode::codeEpilogue));
-		};
-
-		/**
-		 * Epilogue that also frees it's estimated stack usage.  Useful for stdcall/thiscall/fastcall.
-		 */
-		void EpilogueAndFree()
-		{
-			this->Epilogue(m_mystack);
-		};
-
-		/**
-		 * Epilogue.  Pops registers, and frees given amount of data from the stack.
-		 *
-		 * @param howmuch			How many bytes to free from the stack.
-		 */
 		void Epilogue(int howmuch)
 		{
-			unsigned char code[sizeof(::Trampolines::Bytecode::codeEpilogueN)];
+			unsigned char code[sizeof(Bytecode::codeEpilogueN)];
+			memcpy(code, Bytecode::codeEpilogueN, sizeof(code));
+			unsigned char *c = code + Bytecode::codeEpilogueNReplace;
+			union { int i; unsigned char b[4]; } bi;
+			bi.i = howmuch;
+			*c++ = bi.b[0];
+			*c++ = bi.b[1];
+			Append(code, sizeof(code));
+		}
 
-			memcpy(&code[0],&::Trampolines::Bytecode::codeEpilogueN[0],sizeof(::Trampolines::Bytecode::codeEpilogueN));
+		void EpilogueAndFree() { Epilogue(m_mystack); }
 
-
-			unsigned char *c=&code[0];
-
-			union 
-			{
-				int		i;
-				unsigned char	b[4];
-			} bi;
-
-			bi.i=howmuch;
-
-			c+=::Trampolines::Bytecode::codeEpilogueNReplace;
-			*c++=bi.b[0];
-			*c++=bi.b[1];
-
-			Append(&code[0],sizeof(::Trampolines::Bytecode::codeEpilogueN));
-		};
-
-		/**
-		 * Aligns stack on 16 byte boundary for functions that use aligned SSE instructions.
-		 * This also allocates extra stack space to allow the specified number of slots to be used
-		 * for function paramaters that will be pushed onto the stack.
-		 */
 		void AlignStack16(int slots)
 		{
-			const size_t stackNeeded = slots * sizeof(void *);
-			const size_t stackReserve = ke::Align(stackNeeded, 16);
-			const size_t stackExtra = stackReserve - stackNeeded;
+			const size_t need     = slots * sizeof(void *);
+			const size_t reserve  = ke::Align(need, 16);
+			const size_t extra    = reserve - need;
 
-			// Stack space should fit in a byte
-			assert(stackExtra <= 0xFF);
-
-			const size_t codeAlignStackSize = sizeof(::Trampolines::Bytecode::codeAlignStack16);
-			const size_t codeAllocStackSize = sizeof(::Trampolines::Bytecode::codeAllocStack);
-			unsigned char code[codeAlignStackSize + codeAllocStackSize];
-
-			memcpy(&code[0], &::Trampolines::Bytecode::codeAlignStack16[0], codeAlignStackSize);
-
-			if (stackExtra > 0)
-			{
-				unsigned char *c = &code[codeAlignStackSize];
-				memcpy(c, &::Trampolines::Bytecode::codeAllocStack[0], codeAllocStackSize);
-
-				c += ::Trampolines::Bytecode::codeAllocStackReplace;
-				*c = (unsigned char)stackExtra;
-
-				Append(&code[0], codeAlignStackSize + codeAllocStackSize);
-			}
-			else
-			{
-				Append(&code[0], codeAlignStackSize);
+			Append(Bytecode::codeAlignStack16, sizeof(Bytecode::codeAlignStack16));
+			if (extra > 0) {
+				unsigned char code[sizeof(Bytecode::codeAllocStack)];
+				memcpy(code, Bytecode::codeAllocStack, sizeof(code));
+				code[Bytecode::codeAllocStackReplace] = (unsigned char)extra;
+				Append(code, sizeof(code));
 			}
 		}
 
-		/**
-		 * Pushes the "this" pointer onto the callee stack.  Pushes ECX for MSVC, and param0 on GCC.
-		 */
 		void PushThis()
 		{
+			Append(Bytecode::codePushThis, sizeof(Bytecode::codePushThis));
+			m_calledstack += 4;
+		}
 
-			if (!m_thiscall)
-			{
-				return;
-			}
-
-			unsigned char code[sizeof(::Trampolines::Bytecode::codePushThis)];
-
-			memcpy(&code[0],&::Trampolines::Bytecode::codePushThis[0],sizeof(::Trampolines::Bytecode::codePushThis));
-
-
-#if defined(__linux__) || defined(__APPLE__)
-			unsigned char *c=&code[0];
-
-			union 
-			{
-				int		i;
-				unsigned char	b[4];
-			} bi;
-
-			bi.i=m_paramstart+8;
-
-			c+=::Trampolines::Bytecode::codePushThisReplace;
-			*c++=bi.b[0];
-#endif
-
-			Append(&code[0],sizeof(::Trampolines::Bytecode::codePushThis));
-
-#if defined(__linux__) || defined(__APPLE__)
-			m_mystack+=4;
-#endif
-			m_calledstack+=4;
-		};
-
-		/**
-		 * Frees what is estimated as the stack usage of the trampoline.
-		 */
-		void FreeMyStack(void)
-		{
-
-			this->FreeStack(m_mystack);
-		};
-
-		/**
-		 * Frees the estimated stack usage of the callee.
-		 */
-		void FreeTargetStack(void)
-		{
-			this->FreeStack(m_calledstack);
-		};
-
-
-		/**
-		 * Frees the estimated stack usage of the callee and the trampoline.
-		 */
-		void FreeBothStacks(void)
-		{
-			this->FreeStack(m_calledstack + m_mystack);
-		};
-
-		/**
-		 * Frees a given amount of bytes from the stack.
-		 *
-		 * @param howmuch			How many bytes to free.
-		 */
-		void FreeStack(int howmuch)
-		{
-			unsigned char code[sizeof(::Trampolines::Bytecode::codeFreeStack)];
-
-			memcpy(&code[0],&::Trampolines::Bytecode::codeFreeStack[0],sizeof(::Trampolines::Bytecode::codeFreeStack));
-
-			unsigned char *c=&code[0];
-
-			union 
-			{
-				int		i;
-				unsigned char	b[4];
-			} bi;
-
-			bi.i=howmuch;
-
-			c+=::Trampolines::Bytecode::codeFreeStackReplace;
-			*c++=bi.b[0];
-			*c++=bi.b[1];
-			*c++=bi.b[2];
-			*c++=bi.b[3];
-
-			Append(&code[0],sizeof(::Trampolines::Bytecode::codeFreeStack));
-
-		};
-
-		/**
-		 * Pushes a raw number onto the callee stack.
-		 *
-		 * @param Number			The number to push onto the callee stack.
-		 */
 		void PushNum(int Number)
 		{
-			unsigned char code[sizeof(::Trampolines::Bytecode::codePushID)];
+			unsigned char code[sizeof(Bytecode::codePushID)];
+			memcpy(code, Bytecode::codePushID, sizeof(code));
+			unsigned char *c = code + Bytecode::codePushIDReplace;
+			union { int i; unsigned char b[4]; } bi;
+			bi.i = Number;
+			c[0] = bi.b[0]; c[1] = bi.b[1]; c[2] = bi.b[2]; c[3] = bi.b[3];
+			Append(code, sizeof(code));
+			m_calledstack += 4;
+		}
 
-			memcpy(&code[0],&::Trampolines::Bytecode::codePushID[0],sizeof(::Trampolines::Bytecode::codePushID));
-
-			unsigned char *c=&code[0];
-
-			union 
-			{
-				int		i;
-				unsigned char	b[4];
-			} bi;
-
-			bi.i=Number;
-
-			c+=::Trampolines::Bytecode::codePushIDReplace;
-			*c++=bi.b[0];
-			*c++=bi.b[1];
-			*c++=bi.b[2];
-			*c++=bi.b[3];
-
-			Append(&code[0],sizeof(::Trampolines::Bytecode::codePushID));
-
-			m_calledstack+=4; // increase auto detected stack size
-
-		};
-
-
-		/**
-		 * Takes a parameter passed on the trampoline's stack and inserts it into the callee's stack.
-		 *
-		 * @param which			The parameter number to push. 1-based.  "thiscall" trampolines automatically compensate for the off-number on GCC.
-		 */
 		void PushParam(int which)
 		{
-#if defined(__linux__) || defined(__APPLE__)
-			if (m_thiscall)
-			{
-				which++;
-			}
-#endif
-			which=which*4;
-			which+=m_paramstart+4;
+			which = which * 4;
+			which += m_paramstart + 4;
 
-			unsigned char value=which;
+			unsigned char code[sizeof(Bytecode::codePushParam)];
+			memcpy(code, Bytecode::codePushParam, sizeof(code));
+			code[Bytecode::codePushParamReplace] = (unsigned char)which;
+			Append(code, sizeof(code));
 
-			unsigned char code[sizeof(::Trampolines::Bytecode::codePushParam)];
+			m_calledstack += 4;
+			m_mystack     += 4;
+		}
 
-			memcpy(&code[0],&::Trampolines::Bytecode::codePushParam[0],sizeof(::Trampolines::Bytecode::codePushParam));
-
-			unsigned char *c=&code[0];
-
-
-			c+=::Trampolines::Bytecode::codePushParamReplace;
-
-			*c=value;
-
-			Append(&code[0],sizeof(::Trampolines::Bytecode::codePushParam));
-
-			m_calledstack+=4; // increase auto detected stack size
-			m_mystack+=4;
-
-		};
-
-		/**
-		 * Insert a function to call into the trampoline.
-		 * 
-		 * @param ptr			The function to call, cast to void*.
-		 */
 		void Call(void *ptr)
 		{
-			unsigned char code[sizeof(::Trampolines::Bytecode::codeCall)];
+			unsigned char code[sizeof(Bytecode::codeCall)];
+			memcpy(code, Bytecode::codeCall, sizeof(code));
+			unsigned char *c = code + Bytecode::codeCallReplace;
+			union { void *p; unsigned char b[4]; } bp;
+			bp.p = ptr;
+			c[0] = bp.b[0]; c[1] = bp.b[1]; c[2] = bp.b[2]; c[3] = bp.b[3];
+			Append(code, sizeof(code));
+		}
 
-			memcpy(&code[0],&::Trampolines::Bytecode::codeCall[0],sizeof(::Trampolines::Bytecode::codeCall));
+		void FreeStack(int howmuch)
+		{
+			unsigned char code[sizeof(Bytecode::codeFreeStack)];
+			memcpy(code, Bytecode::codeFreeStack, sizeof(code));
+			unsigned char *c = code + Bytecode::codeFreeStackReplace;
+			union { int i; unsigned char b[4]; } bi;
+			bi.i = howmuch;
+			c[0] = bi.b[0]; c[1] = bi.b[1]; c[2] = bi.b[2]; c[3] = bi.b[3];
+			Append(code, sizeof(code));
+		}
 
-			unsigned char *c=&code[0];
+		void FreeTargetStack() { FreeStack(m_calledstack); }
 
-			union 
-			{
-				void	*p;
-				unsigned char	 b[4];
-			} bp;
-
-			bp.p=ptr;
-
-			c+=::Trampolines::Bytecode::codeCallReplace;
-
-			*c++=bp.b[0];
-			*c++=bp.b[1];
-			*c++=bp.b[2];
-			*c++=bp.b[3];
-			Append(&code[0],sizeof(::Trampolines::Bytecode::codeCall));
-
-
-		};
-
-		/**
-		 * Finalizes the trampoline.  Do not try to modify it after this.
-		 *
-		 * @param size			A pointer to retrieve the size of the trampoline. Ignored if set to NULL.
-		 * @return				The trampoline pointer, cast to void*.
-		 */
 		void *Finish(int *size)
 		{
-			//void *ret=(void *)m_buffer;
-
-			if (size)
-			{
-				*size=m_size;
-			}
-
-			// Reallocate with proper flags
-#if defined(_WIN32)
-			void *ret=VirtualAlloc(NULL, m_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
-#elif defined(__GNUC__)
-# if defined(__APPLE__)
-			void *ret = valloc(m_size);
-			mprotect(ret,m_size,PROT_READ|PROT_WRITE|PROT_EXEC);
-# else
-			void *ret=mmap(nullptr, m_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-# endif
-#endif
+			if (size) *size = m_size;
+			void *ret = VirtualAlloc(NULL, m_size, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 			memcpy(ret, m_buffer, m_size);
-
-
-			m_size=0;
-
 			free(m_buffer);
-
-			m_buffer=NULL; // so we don't accidentally rewrite!
-			m_mystack=0;
-			m_calledstack=0;
-			m_maxsize=512;
-
+			m_buffer = NULL;
+			m_size = 0;
+			m_mystack = 0;
+			m_calledstack = 0;
+			m_maxsize = 512;
 			return ret;
-		};
+		}
 	};
-};
 
+	inline int CountStackSlots(const HamSig::HookSignature& sig)
+	{
+		int n = 0;
+		if (sig.ret == HamSig::ReturnKind::VectorSret)
+			n++;	// hidden sret slot occupies one stack dword
+		for (uint8_t i = 0; i < sig.paramCount; ++i) {
+			n += (sig.params[i] == HamSig::ParamKind::Vector) ? 3 : 1;
+		}
+		return n;
+	}
+}	// namespace WinLegacy
 
-/**
- * Utility to make a generic trampoline.
- */
-inline void *CreateGenericTrampoline(bool thiscall, bool voidcall, bool retbuf, int paramcount, void *extraptr, void *callee, int *size)
+inline void *CreateGenericTrampoline(const HamSig::HookSignature& sig,
+                                     void *extraptr, void *callee,
+                                     int *outSize)
 {
-	Trampolines::TrampolineMaker tramp;
+	using namespace WinLegacy;
+	TrampolineMaker tramp;
 
-	if (thiscall)
-	{
-		tramp.ThisPrologue();
-		tramp.AlignStack16(paramcount + 2);	// Param count + this ptr + extra ptr
-	}
-	else
-	{
-		tramp.Prologue();
-		tramp.AlignStack16(paramcount + 1);	// Param count + extra ptr
-	}
+	int paramcount = CountStackSlots(sig);
 
-	while (paramcount)
-	{
+	tramp.Prologue();
+	tramp.AlignStack16(paramcount + 2);	// stack args + this + extraptr
+
+	while (paramcount) {
 		tramp.PushParam(paramcount--);
 	}
-	if (thiscall)
-	{
-		tramp.PushThis();
-	}
-	tramp.PushNum(reinterpret_cast<int>(extraptr));
+	tramp.PushThis();
+	tramp.PushNum(int(reinterpret_cast<uintptr_t>(extraptr)));
 	tramp.Call(callee);
 	tramp.FreeTargetStack();
-
-#if defined(_WIN32)
 	tramp.EpilogueAndFree();
-#elif defined(__linux__) || defined(__APPLE__)
-	if (retbuf)
-	{
-		tramp.Epilogue(4);
-	}
-	else
-	{
-		tramp.Epilogue();
-	}
-#endif
 
-	return tramp.Finish(size);
-};
+	return tramp.Finish(outSize);
+}
 
+inline void FreeTrampoline(void *tramp, int /*size*/)
+{
+	if (tramp) VirtualFree(tramp, 0, MEM_RELEASE);
+}
 
-#endif // TRAMPOLINEMANAGER_H
+}	// namespace Trampolines
+
+#endif	// _WIN32
+
+#endif	// TRAMPOLINES_H

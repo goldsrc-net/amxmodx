@@ -5,7 +5,20 @@ binary = AMXX.MetaModule(builder, 'hamsandwich')
 
 binary.compiler.defines += [
   'HAVE_STDINT_H',
+  'ASMJIT_STATIC',
 ]
+
+binary.compiler.cxxincludes += [
+  os.path.join(builder.sourcePath, 'extern', 'asmjit'),
+  os.path.join(builder.sourcePath, 'extern', 'asmjit', 'asmjit'),
+]
+
+# AsmJit needs C++17. Drop project-wide -std= and set 17 just for this binary.
+binary.compiler.cxxflags = [
+  f for f in binary.compiler.cxxflags if not f.startswith('-std=')
+] + ['-std=c++17']
+
+binary.compiler.linkflags += [AMXX.asmjit.binary]
 
 binary.sources = [
   '../../public/sdk/amxxmodule.cpp',
@@ -17,6 +30,8 @@ binary.sources = [
   'srvcmd.cpp',
   'call_funcs.cpp',
   'hook_create.cpp',
+  'hook_signatures.cpp',
+  'Trampolines.cpp',
   'DataHandler.cpp',
   'pdata.cpp',
   'hook_specialbot.cpp',

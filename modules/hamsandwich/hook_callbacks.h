@@ -681,5 +681,6 @@ extern const HamSig::HookSignature Sig_Void_Vector_Entvar_Entvar_Float_Int_Int;
 extern const HamSig::HookSignature Sig_Void_Vector_Vector;
 extern const HamSig::HookSignature Sig_Void_Void;
 extern const HamSig::HookSignature Sig_Void_pFloat_pFloat;
+extern const HamSig::HookSignature Sig_Deprecated;
 
 #endif
