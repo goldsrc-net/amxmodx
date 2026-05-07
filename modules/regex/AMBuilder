@@ -3,12 +3,18 @@ import os.path
 
 binary = AMXX.MetaModule(builder, 'regex')
 
-if builder.target_platform == 'linux':
-  binary.compiler.postlink += [binary.Dep('lib_linux/libpcre.a')]
-elif builder.target_platform == 'mac':
-  binary.compiler.postlink += [binary.Dep('lib_darwin/libpcre.a')]
-elif builder.target_platform == 'windows':
+# PCRE is now built per-arch from tools/pcre/ so the 32-bit-only
+# prebuilt lib_<plat>/libpcre.a archives are no longer used. On
+# Windows AMBuild path, fall back to the prebuilt for now (msvc12
+# project files retain it independently); Phase 2.4's per-arch
+# build is Linux/Mac focused.
+if builder.target_platform == 'windows':
   binary.compiler.postlink += [binary.Dep('lib_win\\pcre.lib')]
+else:
+  binary.compiler.linkflags += [AMXX.pcre.binary]
+  binary.compiler.includes += [
+    os.path.join(builder.sourcePath, 'tools', 'pcre'),
+  ]
 
 binary.compiler.defines += [
   'PCRE_STATIC',

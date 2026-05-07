@@ -23,6 +23,7 @@ class AMXXConfig(object):
     self.nasm_path = None
     self.target_arch = 'i386'
     self.asmjit = None
+    self.pcre = None
 
   def detectTargetArch(self):
     arch = (getattr(builder.options, 'target_arch', '') or '').lower()
@@ -519,6 +520,11 @@ AMXX.utf8rewind = builder.RunScript(
 
 AMXX.asmjit = builder.RunScript(
   'support/asmjit/AMBuilder',
+  { 'AMXX': AMXX }
+)
+
+AMXX.pcre = builder.RunScript(
+  'support/pcre/AMBuilder',
   { 'AMXX': AMXX }
 )
 

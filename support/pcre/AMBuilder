@@ -1,0 +1,80 @@
+# vim: sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Builds PCRE 8.x as a static lib from the vendored source at
+# tools/pcre/, replacing the prebuilt 32-bit lib_linux/libpcre.a
+# that the regex module historically linked. Required so that the
+# regex module can be built on every arch (i386, amd64, aarch64) —
+# a 32-bit static archive does not link into a 64-bit shared lib.
+#
+# 8-bit interface only (matches what modules/regex actually calls:
+# pcre_compile, pcre_exec, pcre_get_stringnumber, pcre_fullinfo,
+# pcre_copy_named_substring, pcre_free). No JIT (sljit), no 16/32
+# interfaces, no C++ wrappers. Configuration follows PCRE's own
+# NON-AUTOTOOLS-BUILD instructions: pcre.h.generic / config.h.generic
+# / pcre_chartables.c.dist are committed under their canonical
+# names so the source tree builds without needing autotools or CMake.
+import os
+
+lib = builder.compiler.StaticLibrary('pcre')
+
+PCRE_ROOT = os.path.join(builder.sourcePath, 'tools', 'pcre')
+
+lib.compiler.includes += [
+  PCRE_ROOT,
+]
+
+# AsmJit-style: drop project-wide -Werror for vendored third-party.
+lib.compiler.cflags = [f for f in lib.compiler.cflags if f != '-Werror']
+
+lib.compiler.defines += [
+  'HAVE_CONFIG_H',
+  'PCRE_STATIC',
+  'SUPPORT_PCRE8',
+  'SUPPORT_UTF',
+  'SUPPORT_UCP',
+  'HAVE_MEMMOVE',
+  'HAVE_STDINT_H',
+  'HAVE_INTTYPES_H',
+  'HAVE_LIMITS_H',
+  'HAVE_STDLIB_H',
+  'HAVE_STRING_H',
+  'HAVE_SYS_TYPES_H',
+  'HAVE_SYS_STAT_H',
+  'HAVE_UNISTD_H',
+  'HAVE_BCOPY',
+  'HAVE_MEMORY_H',
+  'NEWLINE=10',
+  'LINK_SIZE=2',
+  'POSIX_MALLOC_THRESHOLD=10',
+  'PARENS_NEST_LIMIT=250',
+  'MATCH_LIMIT=10000000',
+  'MATCH_LIMIT_RECURSION=10000000',
+  'MAX_NAME_SIZE=32',
+  'MAX_NAME_COUNT=10000',
+]
+
+lib.sources += [
+  os.path.join(PCRE_ROOT, src) for src in [
+    'pcre_byte_order.c',
+    'pcre_chartables.c',
+    'pcre_compile.c',
+    'pcre_config.c',
+    'pcre_dfa_exec.c',
+    'pcre_exec.c',
+    'pcre_fullinfo.c',
+    'pcre_get.c',
+    'pcre_globals.c',
+    'pcre_maketables.c',
+    'pcre_newline.c',
+    'pcre_ord2utf8.c',
+    'pcre_refcount.c',
+    'pcre_string_utils.c',
+    'pcre_study.c',
+    'pcre_tables.c',
+    'pcre_ucd.c',
+    'pcre_valid_utf8.c',
+    'pcre_version.c',
+    'pcre_xclass.c',
+  ]
+]
+
+rvalue = builder.Add(lib)
