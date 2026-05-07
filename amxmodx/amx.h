@@ -255,7 +255,87 @@ typedef struct tagAMX {
   /* support variables for the JIT */
   int reloc_size      PACKED; /* required temporary buffer for relocations */
   long code_size      PACKED; /* estimated memory footprint of the native code */
+  /* 64-bit native-address side-table. AMX_FUNCSTUB::address is a
+   * 32-bit ucell that historically held a native function pointer or
+   * library handle directly. On 64-bit hosts those pointers do not
+   * fit; we instead store a 1-based index into native_addr_table[].
+   * The fields are always present (uniform layout across builds);
+   * the VM only consults the table on 64-bit, see amx.cpp gates on
+   * __SIZEOF_POINTER__ > (PAWN_CELL_SIZE/8).
+   */
+  void _FAR **native_addr_table   PACKED;
+  int native_addr_count           PACKED;
+  int native_addr_capacity        PACKED;
 } PACKED AMX;
+
+/* AMX_FUNCSTUB::address abstraction.
+ *
+ * Historically `address` held a native function pointer or a dlopen
+ * handle directly, cast through ucell. That works on 32-bit (where
+ * sizeof(ucell) == sizeof(void*)) but not on 64-bit hosts where the
+ * pointer would truncate.
+ *
+ * On 64-bit we route through `amx->native_addr_table[]` and store a
+ * 1-based index in `address`. On 32-bit the macros expand to the
+ * historical direct cast — uniform code paths in amx.cpp, no
+ * behavior change for 32-bit. */
+#if defined(__SIZEOF_POINTER__) && __SIZEOF_POINTER__ > (PAWN_CELL_SIZE/8)
+#  define AMX_USE_ADDR_TABLE 1
+#else
+#  define AMX_USE_ADDR_TABLE 0
+#endif
+
+#include <stdlib.h>  /* realloc / free */
+
+static inline int amx_NativeAddrAlloc(AMX *amx, void *addr) {
+  if (amx->native_addr_count >= amx->native_addr_capacity) {
+    int new_cap = amx->native_addr_capacity ? amx->native_addr_capacity * 2 : 16;
+    void **new_table = (void **)realloc(amx->native_addr_table, new_cap * sizeof(void *));
+    if (new_table == NULL) return 0;
+    amx->native_addr_table = new_table;
+    amx->native_addr_capacity = new_cap;
+  }
+  amx->native_addr_table[amx->native_addr_count++] = addr;
+  return amx->native_addr_count;  /* 1-based */
+}
+
+static inline void *amx_NativeAddrLookup(const AMX *amx, ucell handle) {
+  if (handle == 0) return NULL;
+  if ((int)handle > amx->native_addr_count) return NULL;
+  return amx->native_addr_table[handle - 1];
+}
+
+static inline void amx_NativeAddrSet(AMX *amx, ucell *slot, void *addr) {
+  if (*slot != 0) {
+    int idx = (int)(*slot) - 1;
+    if (idx < amx->native_addr_count) {
+      amx->native_addr_table[idx] = addr;
+      return;
+    }
+  }
+  *slot = (ucell)amx_NativeAddrAlloc(amx, addr);
+}
+
+static inline void amx_NativeAddrTeardown(AMX *amx) {
+  if (amx->native_addr_table != NULL) {
+    free(amx->native_addr_table);
+    amx->native_addr_table = NULL;
+  }
+  amx->native_addr_count = 0;
+  amx->native_addr_capacity = 0;
+}
+
+#if AMX_USE_ADDR_TABLE
+#  define AMX_FUNC_LOAD(amxptr, addr_field)         \
+    amx_NativeAddrLookup((amxptr), (addr_field))
+#  define AMX_FUNC_STORE(amxptr, addr_field, ptr)   \
+    amx_NativeAddrSet((amxptr), &(addr_field), (void *)(ptr))
+#else
+#  define AMX_FUNC_LOAD(amxptr, addr_field)         \
+    ((void *)(uintptr_t)(addr_field))
+#  define AMX_FUNC_STORE(amxptr, addr_field, ptr)   \
+    do { (void)(amxptr); (addr_field) = (ucell)(uintptr_t)(ptr); } while (0)
+#endif
 
 /* The AMX_HEADER structure is both the memory format as the file format. The
  * structure is used internaly.

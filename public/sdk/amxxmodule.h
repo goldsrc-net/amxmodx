@@ -360,9 +360,10 @@ typedef struct tagAMX {
   cell stp              PACKED; /* top of the stack: relative to base + amxhdr->dat */
   int flags             PACKED; /* current status, see amx_Flags() */
   /* user data */
-  long usertags[AMX_USERNUM] PACKED;
+  void _FAR *usertags[AMX_USERNUM] PACKED;
   //okay userdata[3] in AMX Mod X is for the CPlugin * pointer
   //we're also gonna set userdata[2] to a special debug structure
+  //lastly, userdata[1] is for opcode_list from amx_BrowseRelocate
   void _FAR *userdata[AMX_USERNUM] PACKED;
   /* native functions can raise an error */
   int error             PACKED;
@@ -377,6 +378,13 @@ typedef struct tagAMX {
   /* support variables for the JIT */
   int reloc_size      PACKED; /* required temporary buffer for relocations */
   long code_size      PACKED; /* estimated memory footprint of the native code */
+  /* 64-bit native-address side-table — see amx.h for rationale.
+   * Layout MUST match amxmodx/amx.h or modules and core will disagree
+   * on AMX struct size/offsets at the ABI boundary.
+   */
+  void _FAR **native_addr_table   PACKED;
+  int native_addr_count           PACKED;
+  int native_addr_capacity        PACKED;
 } PACKED AMX;
 
 enum {

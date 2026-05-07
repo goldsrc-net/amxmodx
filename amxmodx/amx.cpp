@@ -444,7 +444,7 @@ int AMXAPI amx_Callback(AMX *amx, cell index, cell *result, cell *params)
 #endif
     assert(index>=0 && index<(cell)NUMENTRIES(hdr,natives,libraries));
     func=GETENTRY(hdr,natives,index);
-    f=(AMX_NATIVE)func->address;
+    f=(AMX_NATIVE)AMX_FUNC_LOAD(amx, func->address);
 #if defined AMX_NATIVETABLE
   } /* if */
 #endif
@@ -453,7 +453,7 @@ int AMXAPI amx_Callback(AMX *amx, cell index, cell *result, cell *params)
   /* As of AMX Mod X 1.56, we don't patch sysreq.c to sysreq.d anymore.
    * Otherwise, we'd have no way of knowing the last native to be used.
    */
-  amx->usertags[UT_NATIVE] = (void *)index;
+  amx->usertags[UT_NATIVE] = (void *)(intptr_t)index;
 
   /* Note:
    *   params[0] == number of bytes for the additional parameters passed to the native function
@@ -1035,27 +1035,29 @@ int AMXAPI amx_Cleanup(AMX *amx)
     for (i=0; i<numlibraries; i++) {
       lib=GETENTRY(hdr,libraries,i);
       if (lib->address!=0) {
+        void *libhandle = AMX_FUNC_LOAD(amx, lib->address);
         char funcname[sNAMEMAX+12]; /* +1 for '\0', +4 for 'amx_', +7 for 'Cleanup' */
         strcpy(funcname,"amx_");
         strcat(funcname,GETENTRYNAME(hdr,lib));
         strcat(funcname,"Cleanup");
         #if defined _Windows
-          libcleanup=(AMX_ENTRY)GetProcAddress((HINSTANCE)lib->address,funcname);
+          libcleanup=(AMX_ENTRY)GetProcAddress((HINSTANCE)libhandle,funcname);
         #elif defined LINUX || defined __FreeBSD__ || defined __OpenBSD__ || defined __APPLE__
-          libcleanup=(AMX_ENTRY)dlsym((void*)lib->address,funcname);
+          libcleanup=(AMX_ENTRY)dlsym(libhandle,funcname);
         #endif
         if (libcleanup!=NULL)
           libcleanup(amx);
         #if defined _Windows
-          FreeLibrary((HINSTANCE)lib->address);
+          FreeLibrary((HINSTANCE)libhandle);
         #elif defined LINUX || defined __FreeBSD__ || defined __OpenBSD__ || defined __APPLE__
-          dlclose((void*)lib->address);
+          dlclose(libhandle);
         #endif
       } /* if */
     } /* for */
   #else
     (void)amx;
   #endif
+  amx_NativeAddrTeardown(amx);
   return AMX_ERR_NONE;
 }
 #endif /* AMX_CLEANUP */
@@ -1472,7 +1474,7 @@ int AMXAPI amx_RegisterToAny(AMX *amx, AMX_NATIVE f)
   for (i=0; i<numnatives; i++) {
     if (func->address==0) {
       /* this function is not yet located */
-      func->address=(ucell)f;
+      AMX_FUNC_STORE(amx, func->address, f);
     } /* if */
     func=(AMX_FUNCSTUB*)((unsigned char*)func+hdr->defsize);
   } /* for */
@@ -1502,7 +1504,7 @@ int AMXAPI amx_Reregister(AMX *amx, const AMX_NATIVE_INFO *list, int number)
       funcptr=(list!=NULL) ? findfunction(GETENTRYNAME(hdr,func),list,number) : NULL;
       if (funcptr!=NULL)
       {
-        func->address=(ucell)funcptr;
+        AMX_FUNC_STORE(amx, func->address, funcptr);
         count++;
       }
     } /* if */
@@ -1532,7 +1534,7 @@ int AMXAPI amx_Register(AMX *amx, const AMX_NATIVE_INFO *list, int number)
       funcptr=(list!=NULL) ? findfunction(GETENTRYNAME(hdr,func),list,number) : NULL;
       if (funcptr!=NULL)
       {
-        func->address=(ucell)funcptr;
+        AMX_FUNC_STORE(amx, func->address, funcptr);
       } else {
         no_function = GETENTRYNAME(hdr,func);
         err=AMX_ERR_NOTFOUND;

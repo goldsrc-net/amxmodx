@@ -429,7 +429,7 @@ int AMXAPI amx_Callback(AMX *amx, cell index, cell *result, cell *params)
 #endif
     assert(index>=0 && index<(cell)NUMENTRIES(hdr,natives,libraries));
     func=GETENTRY(hdr,natives,index);
-    f=(AMX_NATIVE)func->address;
+    f=(AMX_NATIVE)AMX_FUNC_LOAD(amx, func->address);
 #if defined AMX_NATIVETABLE
   } /* if */
 #endif
@@ -445,6 +445,12 @@ int AMXAPI amx_Callback(AMX *amx, cell index, cell *result, cell *params)
     if ((amx->flags & AMX_FLAG_JITC)!=0)
       assert(amx->sysreq_d==0);
   #endif
+  /* SYSREQ.D fast-path: patch the SYSREQ.C call-site to call the
+   * native pointer directly. This requires the function pointer to
+   * fit in a cell, which is only true when sizeof(void*) <= sizeof(cell).
+   * On 64-bit hosts with PAWN_CELL_SIZE=32 it doesn't, so we keep
+   * dispatching through amx_Callback. */
+#if !AMX_USE_ADDR_TABLE
   if (amx->sysreq_d!=0) {
     /* at the point of the call, the CIP pseudo-register points directly
      * behind the SYSREQ instruction and its parameter.
@@ -460,9 +466,10 @@ int AMXAPI amx_Callback(AMX *amx, cell index, cell *result, cell *params)
       assert(*(cell*)code==index);
 #endif
       *(cell*)(code-sizeof(cell))=amx->sysreq_d;
-      *(cell*)code=(cell)f;
+      *(cell*)code=(cell)(uintptr_t)f;
     } /* if */
   } /* if */
+#endif
 
   /* Note:
    *   params[0] == number of bytes for the additional parameters passed to the native function
@@ -487,9 +494,9 @@ int AMXAPI amx_Callback(AMX *amx, cell index, cell *result, cell *params)
   #define RELOC_ABS(base, off)
   #define RELOC_VALUE(base, v)
 #else
-  #define JUMPABS(base, ip)     ((cell *)*(ip))
-  #define RELOC_ABS(base, off)  (*(ucell *)((base)+(int)(off)) += (ucell)(base))
-  #define RELOC_VALUE(base, v)  ((v)+((ucell)(base)))
+  #define JUMPABS(base, ip)     ((cell *)(uintptr_t)*(ip))
+  #define RELOC_ABS(base, off)  (*(ucell *)((base)+(int)(off)) += (ucell)(uintptr_t)(base))
+  #define RELOC_VALUE(base, v)  ((v)+((ucell)(uintptr_t)(base)))
 #endif
 
 #define DBGPARAM(v)     ( (v)=*(cell *)(code+(int)cip), cip+=sizeof(cell) )
@@ -999,7 +1006,7 @@ int AMXAPI amx_Init(AMX *amx,void *program)
         if (libinit!=NULL)
           libinit(amx);
       } /* if */
-      lib->address=(ucell)hlib;
+      AMX_FUNC_STORE(amx, lib->address, hlib);
     } /* for */
   #endif
 
@@ -1122,21 +1129,22 @@ int AMXAPI amx_Cleanup(AMX *amx)
     for (i=0; i<numlibraries; i++) {
       lib=GETENTRY(hdr,libraries,i);
       if (lib->address!=0) {
+        void *libhandle = AMX_FUNC_LOAD(amx, lib->address);
         char funcname[sNAMEMAX+12]; /* +1 for '\0', +4 for 'amx_', +7 for 'Cleanup' */
         strcpy(funcname,"amx_");
         strcat(funcname,GETENTRYNAME(hdr,lib));
         strcat(funcname,"Cleanup");
         #if defined _Windows
-          libcleanup=(AMX_ENTRY)GetProcAddress((HINSTANCE)lib->address,funcname);
+          libcleanup=(AMX_ENTRY)GetProcAddress((HINSTANCE)libhandle,funcname);
         #elif defined LINUX || defined __FreeBSD__ || defined __OpenBSD__ || defined __APPLE__
-          libcleanup=(AMX_ENTRY)dlsym((void*)lib->address,funcname);
+          libcleanup=(AMX_ENTRY)dlsym(libhandle,funcname);
         #endif
         if (libcleanup!=NULL)
           libcleanup(amx);
         #if defined _Windows
-          FreeLibrary((HINSTANCE)lib->address);
+          FreeLibrary((HINSTANCE)libhandle);
         #elif defined LINUX || defined __FreeBSD__ || defined __OpenBSD__ || defined __APPLE__
-          dlclose((void*)lib->address);
+          dlclose(libhandle);
         #endif
       } /* if */
     } /* for */
@@ -1563,7 +1571,7 @@ int AMXAPI amx_Register(AMX *amx, const AMX_NATIVE_INFO *list, int number)
       /* this function is not yet located */
       funcptr=(list!=NULL) ? findfunction(GETENTRYNAME(hdr,func),list,number) : NULL;
       if (funcptr!=NULL)
-        func->address=(ucell)funcptr;
+        AMX_FUNC_STORE(amx, func->address, funcptr);
       else
         err=AMX_ERR_NOTFOUND;
     } /* if */
