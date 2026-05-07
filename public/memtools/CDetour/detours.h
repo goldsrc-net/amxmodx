@@ -373,5 +373,46 @@ inline void IA32_Write_Jump32_Abs(JitWriter *jit, unsigned int jmp, void *target
 	jit->outptr = oldptr;
 }
 
+/* Emit an unconditional tail jump from the trampoline back to the original
+ * function (target). On i386 a 5-byte E9 rel32 is used. On amd64 we always
+ * emit the 14-byte FF 25 indirect form so the trampoline → text-section
+ * jump works regardless of distance. On aarch64 a 16-byte LDR/BR/literal
+ * sequence (matching DoGatePatch) is used. JitWriter::outptr advances by
+ * the right amount for each arch.
+ *
+ * Returns the byte length emitted (or that would be emitted, if outbase is
+ * NULL — the caller passes a NULL outbase first to size the buffer, then
+ * allocates and re-emits). */
+inline unsigned int Detour_TailJump(JitWriter *jit, void *target)
+{
+#if defined(__i386__) || (defined(_M_IX86) && !defined(_M_X64))
+	if (jit->outbase) {
+		jit->outptr[0] = 0xE9;
+		int32_t rel = (int32_t)((unsigned char *)target - ((unsigned char *)jit->outptr + 5));
+		*(int32_t *)(jit->outptr + 1) = rel;
+	}
+	jit->outptr += 5;
+	return 5;
+#elif defined(__x86_64__) || defined(_M_X64)
+	if (jit->outbase) {
+		jit->outptr[0] = 0xFF;
+		jit->outptr[1] = 0x25;
+		*(uint32_t *)(jit->outptr + 2) = 0;
+		*(uint64_t *)(jit->outptr + 6) = (uint64_t)(uintptr_t)target;
+	}
+	jit->outptr += 14;
+	return 14;
+#elif defined(__aarch64__) || defined(_M_ARM64)
+	if (jit->outbase) {
+		uint32_t *p = (uint32_t *)jit->outptr;
+		p[0] = 0x58000050u;                 /* LDR  x16, [pc+8] */
+		p[1] = 0xD61F0200u;                 /* BR   x16 */
+		*(uint64_t *)(p + 2) = (uint64_t)(uintptr_t)target;
+	}
+	jit->outptr += 16;
+	return 16;
+#endif
+}
+
 
 #endif // _INCLUDE_SOURCEMOD_DETOURS_H_

@@ -151,7 +151,16 @@ bool CDetour::CreateDetour()
 		return false;
 	}
 
-	detour_restore.bytes = copy_bytes((unsigned char *)detour_address, NULL, OP_JMP_SIZE+1);
+	/* Walk the prologue until we have at least DETOUR_GATE_SIZE bytes to
+	 * overwrite with the unconditional jump. copy_bytes returns the number of
+	 * bytes consumed (instruction-aligned); 0 means it couldn't decode (e.g.
+	 * an opcode it doesn't know, or a PC-relative target out of rel32 range
+	 * after relocation). */
+	detour_restore.bytes = copy_bytes((unsigned char *)detour_address, NULL, DETOUR_GATE_SIZE);
+	if (detour_restore.bytes < DETOUR_GATE_SIZE)
+	{
+		return false;
+	}
 
 	/* First, save restore bits */
 	for (size_t i=0; i<detour_restore.bytes; i++)
@@ -162,22 +171,21 @@ bool CDetour::CreateDetour()
 	JitWriter wr;
 	JitWriter *jit = &wr;
 	unsigned int CodeSize = 0;
-	
+
 	wr.outbase = NULL;
 	wr.outptr = NULL;
 
 jit_rewind:
 
-	/* Patch old bytes in */
+	/* Patch old bytes in (with PC-relative fixup for the moved location) */
 	if (wr.outbase != NULL)
 	{
 		copy_bytes((unsigned char *)detour_address, (unsigned char*)wr.outptr, detour_restore.bytes);
 	}
 	wr.outptr += detour_restore.bytes;
 
-	/* Return to the original function */
-	unsigned int call = IA32_Jump_Imm32(jit, 0);
-	IA32_Write_Jump32_Abs(jit, call, (unsigned char *)detour_address + detour_restore.bytes);
+	/* Return to the original function (per-arch unconditional jump) */
+	Detour_TailJump(jit, (unsigned char *)detour_address + detour_restore.bytes);
 
 	if (wr.outbase == NULL)
 	{
