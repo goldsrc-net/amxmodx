@@ -23,7 +23,7 @@ global amxx_DynaInit, _amxx_DynaInit
 ;void amxx_DynaInit(void *ptr);
 amxx_DynaInit:
 _amxx_DynaInit:
-	mov	[GLOBAL_GATE wrt rip], rdi
+	mov	[rel GLOBAL_GATE], rdi
 	ret
 	
 ;;Assembles the gateway function
@@ -49,7 +49,7 @@ _amxx_DynaMake:
 	mov		[rdi], qword rax
 	;align rdi to the call
 	add		rdi, (_amxx_DynaFuncStart.call-_amxx_DynaFuncStart.move) 
-	mov		rax, qword [GLOBAL_GATE wrt rip]
+	mov		rax, qword [rel GLOBAL_GATE]
 	;copy the real address
 	mov		[rdi], rax
 	

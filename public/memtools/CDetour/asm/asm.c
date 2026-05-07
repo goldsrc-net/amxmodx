@@ -1,5 +1,7 @@
 #include "asm.h"
 
+#include <stdint.h>
+
 #ifndef WIN32
 #define _GNU_SOURCE
 #include <dlfcn.h>
