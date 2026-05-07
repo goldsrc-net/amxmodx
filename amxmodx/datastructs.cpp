@@ -9,6 +9,7 @@
 
 #include "amxmodx.h"
 #include "datastructs.h"
+#include "string_handles.h"
 #include <amtl/am-utility.h>
 
 NativeHandle<CellArray> ArrayHandles;
@@ -444,7 +445,7 @@ static cell AMX_NATIVE_CALL ArrayGetStringHandle(AMX* amx, cell* params)
 		return 0;
 	}
 
-	return reinterpret_cast<cell>(ptr);
+	return g_amxx_string_handles().find_or_alloc(ptr);
 }
 
 // native ArrayInsertArrayAfter(Array:which, item, const any:input[]);

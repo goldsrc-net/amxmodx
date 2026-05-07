@@ -419,7 +419,11 @@ static cell AMX_NATIVE_CALL param_convert(AMX *amx, cell *params)
 	unsigned char *data =amx->base+(int)((AMX_HEADER *)amx->base)->dat;
 	unsigned char *realdata = caller->base+(int)((AMX_HEADER *)caller->base)->dat;
 
-	* (cell *)(data+(int)amx->frm+(p+2)*sizeof(cell)) -= (cell)data-(cell)realdata;
+	// Compute the cross-AMX data-segment offset in pointer-width arithmetic
+	// before narrowing to cell. Each AMX's data segment fits in < 2 GB so
+	// the difference always fits in a 32-bit cell, but on 64-bit hosts the
+	// individual addresses don't, so don't narrow them separately.
+	* (cell *)(data+(int)amx->frm+(p+2)*sizeof(cell)) -= (cell)(intptr_t(data) - intptr_t(realdata));
 
 	return 1;
 }

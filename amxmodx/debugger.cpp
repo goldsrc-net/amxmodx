@@ -10,6 +10,18 @@
 #include "amxmodx.h"
 #include "debugger.h"
 #include "binlog.h"
+#include "AMXModulePtrHandle.h"
+
+// Cell-sized handle table for trace_info_t pointers exposed to plugins
+// via dbg_trace_start / dbg_trace_next / dbg_trace_info. PAWN_CELL_SIZE=32
+// cannot hold a native pointer on a 64-bit host. Plugin-visible cells are
+// 1-based indices; nullptr always maps to 0 so existing null checks
+// continue to work.
+static PtrHandleTable<trace_info_t> &g_trace_handles()
+{
+	static PtrHandleTable<trace_info_t> tbl;
+	return tbl;
+}
 
 /**
  * AMX Mod X Debugging Engine
@@ -396,60 +408,14 @@ int Debugger::FormatError(char *buffer, size_t maxLength)
 	return size;
 }
 
-cell Debugger::_CipAsVa(cell cip)
-{
-	AMX_HEADER *hdr = (AMX_HEADER*)(m_pAmx->base);
-	unsigned char *code = m_pAmx->base + (int)hdr->cod;
-
-	if (cip >= (cell)code && cip < (cell)(m_pAmx->base + (int)hdr->dat))
-	{
-		return (cell)(cip-(cell)code);
-	} else {
-		return (cell)(code + cip);
-	}
-}
-
-int Debugger::_GetOpcodeFromCip(cell cip, cell *&addr)
-{
-	AMX_HEADER *hdr = (AMX_HEADER*)(m_pAmx->base);
-	unsigned char *code = m_pAmx->base + (int)hdr->cod;
-
-	cell *p_cip = NULL;
-	//test if cip is between these 
-	if (cip >= (cell)code && cip < (cell)(m_pAmx->base + (int)hdr->dat))
-	{
-		p_cip = (cell *)(cip);
-	} else {
-		p_cip = (cell *)(code + cip);
-	}
-
-	//move forward one entry
-	addr = p_cip + 1;
-
-	//p_cip should be aligned to an instruction!
-	cell instr = *p_cip;
-
-	if (instr < 1 || instr >= OP_NUM_OPCODES)
-	{
-		if (!m_pOpcodeList)
-			return 0;
-
-		//we have an invalid opcode, so try searching for it
-		for (cell i=1; i<OP_NUM_OPCODES; i++)
-		{
-			if ((cell)m_pOpcodeList[i] == instr)
-			{
-				instr = i;
-				break;
-			}
-		}
-
-		if (instr < 1 || instr >= OP_NUM_OPCODES)
-			instr = 0;		//nothing found
-	}
-
-	return (int)instr;
-}
+// Note: _CipAsVa and _GetOpcodeFromCip were removed. Both relied on
+// (cell)<native pointer> casts that lose precision on 64-bit, and
+// both had only commented-out callers (FmtNativeError uses
+// m_pAmx->usertags[UT_NATIVE] instead of the bytecode-walking path
+// that called these). If the bytecode-walking path is ever revived,
+// reimplement against an explicit (base, offset) pair rather than
+// re-introducing absolute-address-vs-relative-offset detection that
+// can't work with 32-bit cells on a 64-bit host.
 
 void Debugger::_CacheAmxOpcodeList()
 {
@@ -906,7 +872,7 @@ static cell AMX_NATIVE_CALL dbg_trace_begin(AMX *amx, cell *params)
 
 	trace_info_t *pTrace = pHandler->GetTrace();
 
-	return (cell)(pTrace);
+	return g_trace_handles().find_or_alloc(pTrace);
 }
 
 static cell AMX_NATIVE_CALL dbg_trace_next(AMX *amx, cell *params)
@@ -916,10 +882,10 @@ static cell AMX_NATIVE_CALL dbg_trace_next(AMX *amx, cell *params)
 	if (!pDebugger)
 		return 0;
 
-	trace_info_t *pTrace = (trace_info_t *)(params[1]);
+	trace_info_t *pTrace = g_trace_handles().get(params[1]);
 
 	if (pTrace)
-		return (cell)(pDebugger->GetNextTrace(pTrace));
+		return g_trace_handles().find_or_alloc(pDebugger->GetNextTrace(pTrace));
 
 	return 0;
 }
@@ -931,7 +897,7 @@ static cell AMX_NATIVE_CALL dbg_trace_info(AMX *amx, cell *params)
 	if (!pDebugger)
 		return 0;
 
-	trace_info_t *pTrace = (trace_info_t *)(params[1]);
+	trace_info_t *pTrace = g_trace_handles().get(params[1]);
 
 	if (!pTrace)
 		return 0;

@@ -10,6 +10,7 @@
 #include "amxmodx.h"
 #include "format.h"
 #include "datastructs.h"
+#include "string_handles.h"
 
 //Adapted from Quake3's vsprintf
 // thanks to cybermind for linking me to this :)
@@ -660,11 +661,16 @@ reswitch:
 		case 'a':
 			{
 				CHECK_ARGS(0);
-				// %a is passed a pointer directly to a cell string.
-				cell* ptr=reinterpret_cast<cell*>(*get_amxaddr(amx, params[arg]));
+				// %a takes a cell handle returned by ArrayGetStringHandle
+				// (1-based index into g_amxx_string_handles); resolve back
+				// to the cell* held in the array's storage. PAWN_CELL_SIZE=32
+				// cannot hold a native pointer on 64-bit hosts, so the
+				// round-trip must go through the shared handle table.
+				cell handle = *get_amxaddr(amx, params[arg]);
+				cell* ptr = g_amxx_string_handles().get(handle);
 				if (!ptr)
 				{
-					LogError(amx, AMX_ERR_NATIVE, "Invalid vector string handle provided (%d)", *get_amxaddr(amx, params[arg]));
+					LogError(amx, AMX_ERR_NATIVE, "Invalid vector string handle provided (%d)", handle);
 					return 0;
 				}
 

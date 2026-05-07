@@ -110,10 +110,7 @@ public:
 	static void GenericMessage(AMX *amx, int error);
 private:
 	void _CacheAmxOpcodeList();
-	
-	int _GetOpcodeFromCip(cell cip, cell *&addr);
-	cell _CipAsVa(cell cip);
-	
+
 	const char *_GetFilename();
 	const char *_GetVersion();
 public:
