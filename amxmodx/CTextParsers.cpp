@@ -458,8 +458,24 @@ SMCError TextParsers::ParseStream_SMC(void *stream,
 			{
 				if (in_quote)
 				{
-					/* If i was 0, we could have reparsed, so make sure there's no buffer underrun */
-					if ((&parse_point[i] != in_buf) && c == '"' && parse_point[i - 1] != '\\')
+					/* Look up the byte preceding parse_point[i] to decide whether the current
+					 * char is an escaped quote. The original code spelled this as
+					 * `parse_point[i - 1]` with a guard `&parse_point[i] != in_buf`, which on
+					 * 32-bit modular-wraps to the right byte when i == 0 but on 64-bit
+					 * unsigned-extends `i - 1 == 0xFFFFFFFF` and adds it zero-extended to
+					 * parse_point, producing a non-canonical address (instant SIGSEGV). Use
+					 * pointer arithmetic with explicit bounds: when i == 0, peek at the byte
+					 * just before parse_point if it's still inside in_buf. */
+					unsigned char prev = '\0';
+					if (i > 0)
+					{
+						prev = (unsigned char)parse_point[i - 1];
+					}
+					else if (parse_point > in_buf)
+					{
+						prev = (unsigned char)*(parse_point - 1);
+					}
+					if (c == '"' && prev != '\\')
 					{
 						/* If we reached a quote in an ignore phase,
 						* we're staging a string and we must rotate it out.

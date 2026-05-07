@@ -548,7 +548,14 @@ static int amx_BrowseRelocate(AMX *amx)
   assert(OP_SYMBOL==126);
 
   amx->sysreq_d=0;      /* preset */
-  #if (defined __GNUC__ || defined ASM32 || defined JIT) 
+  /* The opcode-list / label-table dance only applies to dispatch paths that
+   * substitute label addresses (or JIT/ASM trampolines) for raw opcode small
+   * ints inside the bytecode. That includes ASM32, JIT, and GCC labels-as-
+   * values when sizeof(void*) <= sizeof(cell). On 64-bit non-JIT builds the
+   * switch dispatcher consumes raw opcode small ints and any relocation
+   * truncates a 64-bit label/JIT address into a 32-bit cell, corrupting the
+   * bytecode (later amx_Exec hits the default case → assert(0)). */
+  #if defined ASM32 || defined JIT || (defined __GNUC__ && (defined(__SIZEOF_POINTER__) ? __SIZEOF_POINTER__ : 4) <= (PAWN_CELL_SIZE / 8))
     amx_Exec(amx, (cell*)(void*)&opcode_list, 0);
     /* to use direct system requests, a function pointer must fit in a cell;
      * because the native function's address will be stored as the parameter
@@ -558,9 +565,9 @@ static int amx_BrowseRelocate(AMX *amx)
       amx->sysreq_d=opcode_list[OP_SYSREQ_D];
 	amx->userdata[UD_OPCODELIST] = (void *)opcode_list;
   #else
-    /* ANSI C
-     * to use direct system requests, a function pointer must fit in a cell;
-     * see the comment above
+    /* Switch-dispatch interpreter (used on 64-bit non-JIT builds): leave
+     * the opcode list null and SYSREQ.D disabled. amx_Exec compares the
+     * raw opcode int against case labels.
      */
     if (sizeof(AMX_NATIVE)<=sizeof(cell))
       amx->sysreq_d=OP_SYSREQ_D;
@@ -575,10 +582,12 @@ static int amx_BrowseRelocate(AMX *amx)
       amx->flags &= ~AMX_FLAG_BROWSE;
       return AMX_ERR_INVINSTR;
     } /* if */
-    #if defined __GNUC__ || defined ASM32 || defined JIT
+    #if defined ASM32 || defined JIT || (defined __GNUC__ && (defined(__SIZEOF_POINTER__) ? __SIZEOF_POINTER__ : 4) <= (PAWN_CELL_SIZE / 8))
       /* relocate opcode (only works if the size of an opcode is at least
        * as big as the size of a pointer (jump address); so basically we
-       * rely on the opcode and a pointer being 32-bit
+       * rely on the opcode and a pointer being 32-bit. On 64-bit non-JIT
+       * builds we leave the raw opcode small int in place so the switch
+       * dispatcher matches it.
        */
       *(cell *)(code+(int)cip) = opcode_list[op];
     #endif
