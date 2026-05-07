@@ -29,8 +29,11 @@
 
 #if defined(WIN32)
 	#define FORCE_STACK_ALIGN
-#else
+#elif defined(__i386__) || defined(__x86_64__) || defined(_M_IX86) || defined(_M_X64)
 	#define FORCE_STACK_ALIGN __attribute__((force_align_arg_pointer))
+#else
+	// force_align_arg_pointer is x86-only; GCC emits -Wattributes on aarch64.
+	#define FORCE_STACK_ALIGN
 #endif
 
 #define EXT_FUNC FORCE_STACK_ALIGN

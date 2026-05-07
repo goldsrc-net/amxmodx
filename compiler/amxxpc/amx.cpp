@@ -1659,9 +1659,12 @@ int AMXAPI amx_PushString(AMX *amx, cell *amx_addr, cell **phys_addr, const char
 #define CHKSTACK()      if (stk>amx->stp) return AMX_ERR_STACKLOW
 #define CHKHEAP()       if (hea<amx->hlw) return AMX_ERR_HEAPLOW
 
-#if defined __GNUC__ && !(defined ASM32 || defined JIT)
+#if defined __GNUC__ && !(defined ASM32 || defined JIT) && (defined(__SIZEOF_POINTER__) ? __SIZEOF_POINTER__ : 4) <= (PAWN_CELL_SIZE / 8)
     /* GNU C version uses the "labels as values" extension to create
-     * fast "indirect threaded" interpreter.
+     * fast "indirect threaded" interpreter. Disabled when sizeof(void*) >
+     * sizeof(cell), since amx_BrowseRelocate stuffs label addresses into
+     * cells; on 64-bit hosts with PAWN_CELL_SIZE=32 the addresses don't
+     * fit and the switch-dispatch fallback below is used instead.
      */
 
 #define NEXT(cip)       goto *(const void *)*cip++

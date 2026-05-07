@@ -4,19 +4,30 @@ import os.path
 binary = AMXX.MetaPlugin(builder, 'amxmodx')
 
 binary.compiler.defines += [
-  'JIT',
-  'ASM32',
   'HAVE_STDINT_H',
 ]
 
-AMXX.AddAssembly(builder, binary, 'helpers-x86.asm', 'helpers-asm.obj')
-AMXX.AddAssembly(builder, binary, 'natives-x86.asm', 'natives-asm.obj')
-AMXX.AddAssembly(builder, binary, 'amxexecn.asm', 'amxexecn-asm.obj',
-  includes=['amxdefn.asm'])
-AMXX.AddAssembly(builder, binary, 'amxjitsn.asm', 'amxjitsn-asm.obj',
-  includes=['amxdefn.asm'],
-  # Opcode sizes must be maximum width for patching to work.
-  extra_argv=['-O0'])
+if AMXX.target_arch == 'i386':
+  # x86 NASM JIT + interpreter, helpers, native-call gateway.
+  binary.compiler.defines += ['JIT', 'ASM32']
+  AMXX.AddAssembly(builder, binary, 'helpers-x86.asm', 'helpers-asm.obj')
+  AMXX.AddAssembly(builder, binary, 'natives-x86.asm', 'natives-asm.obj')
+  AMXX.AddAssembly(builder, binary, 'amxexecn.asm', 'amxexecn-asm.obj',
+    includes=['amxdefn.asm'])
+  AMXX.AddAssembly(builder, binary, 'amxjitsn.asm', 'amxjitsn-asm.obj',
+    includes=['amxdefn.asm'],
+    # Opcode sizes must be maximum width for patching to work.
+    extra_argv=['-O0'])
+elif AMXX.target_arch == 'amd64':
+  # amd64 keeps the native-call gateway in NASM (natives-amd64.asm) but
+  # falls back to the C interpreter in amx.cpp until the AsmJit-based
+  # JIT replacement lands.
+  AMXX.AddAssembly(builder, binary, 'natives-amd64.asm', 'natives-asm.obj')
+elif AMXX.target_arch == 'aarch64':
+  # aarch64: hand-coded register_native trampoline emitter (C++); the AMX
+  # VM falls back to amx.cpp's C interpreter until an AsmJit-based JIT
+  # replacement lands. The .cpp is appended to binary.sources further down.
+  pass
 
 if builder.target_platform == 'mac':
   binary.compiler.postlink += [
@@ -98,5 +109,8 @@ binary.sources = [
 
 if builder.target_platform == 'windows':
   binary.sources += ['version.rc']
+
+if AMXX.target_arch == 'aarch64':
+  binary.sources += ['natives-aarch64.cpp']
 
 AMXX.binaries += [builder.Add(binary)]

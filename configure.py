@@ -32,4 +32,6 @@ run.options.add_option('--disable-auto-versioning', action='store_true', dest='d
                        default=False, help='Disable the auto versioning script')
 run.options.add_option('--nasm', type='string', dest='nasm_path',
                        default='nasm', help='Path to NASM')
+run.options.add_option('--target-arch', type='string', dest='target_arch',
+                       default='', help='Target architecture: i386 (default), amd64, or aarch64')
 run.Configure()

@@ -21,6 +21,15 @@ class AMXXConfig(object):
     self.csx_app = None
     self.stdcxx_path = None
     self.nasm_path = None
+    self.target_arch = 'i386'
+
+  def detectTargetArch(self):
+    arch = (getattr(builder.options, 'target_arch', '') or '').lower()
+    if not arch:
+      arch = 'i386'
+    if arch not in ('i386', 'amd64', 'aarch64'):
+      raise Exception('Unsupported --target-arch={0} (expected i386, amd64, or aarch64)'.format(arch))
+    self.target_arch = arch
 
   def use_auto_versioning(self):
     if builder.backend != 'amb2':
@@ -107,6 +116,8 @@ class AMXXConfig(object):
         raise Exception('Could not find MySQL! Try passing --mysql to configure.py.')
 
   def detectNASM(self):
+    if self.target_arch == 'aarch64':
+      return
     import subprocess
 
     nasm_paths = [
@@ -178,6 +189,12 @@ class AMXXConfig(object):
       'AMXX_USE_VERSIONLIB',
     ]
 
+    # AMD64 in this codebase means "64-bit pointer build with no x86 NASM JIT".
+    # Defined on both amd64 and aarch64 so the existing `#if defined AMD64` gates
+    # turn off asm-dependent features (cvar query, CpuSupport) on aarch64 too.
+    if self.target_arch in ('amd64', 'aarch64'):
+      cxx.defines += ['AMD64']
+
     if self.use_auto_versioning():
       cxx.defines += ['AMXX_GENERATED_BUILD']
       cxx.includes += [os.path.join(builder.buildPath, 'includes')]
@@ -198,20 +215,37 @@ class AMXXConfig(object):
       '-pipe',
       '-fno-strict-aliasing',
       '-Wall',
-      '-Werror',
       '-Wno-uninitialized',
       '-Wno-unused',
       '-Wno-switch',
       '-Wno-format',
       '-Wno-format-security',
-      '-m32',
     ]
+    if self.target_arch == 'i386':
+      cxx.cflags += ['-m32']
+      cxx.linkflags += ['-m32']
+      cxx.cflags += ['-Werror']
+    elif self.target_arch == 'amd64':
+      cxx.cflags += ['-m64']
+      cxx.linkflags += ['-m64']
+    # aarch64: arch is determined by the toolchain prefix (e.g. CC=aarch64-linux-gnu-gcc);
+    # no -m flag.
+
+    # On 64-bit builds the AMX VM and friends pack native pointers into
+    # 32-bit cells in many places (debugger, JUMPABS-style relocation,
+    # native gateway book-keeping). A complete audit/refactor is Phase 4
+    # work; until then, drop -Werror on 64-bit and run -fpermissive so
+    # narrowing pointer<->int casts compile as warnings. Affects mostly
+    # debug/trace paths at runtime.
+    if self.target_arch in ('amd64', 'aarch64'):
+      cxx.cxxflags += ['-fpermissive']
+      # 64-bit shared objects need PIC; ld errors with R_X86_64_PC32
+      # relocations otherwise (Metamod-R hit identically).
+      cxx.cflags += ['-fPIC']
     cxx.cxxflags += [
       '-Wno-invalid-offsetof',
       '-std=c++11',
     ]
-
-    cxx.linkflags += ['-m32']
 
     have_gcc = cxx.vendor == 'gcc'
     have_clang = cxx.vendor == 'clang'
@@ -285,8 +319,13 @@ class AMXXConfig(object):
       '/GR-',
       '/TP',
     ]
+    machine = {
+      'i386': '/MACHINE:X86',
+      'amd64': '/MACHINE:X64',
+      'aarch64': '/MACHINE:ARM64',
+    }[self.target_arch]
     cxx.linkflags += [
-      '/MACHINE:X86',
+      machine,
       '/SUBSYSTEM:WINDOWS',
       'kernel32.lib',
       'user32.lib',
@@ -324,7 +363,12 @@ class AMXXConfig(object):
     elif cxx.vendor == 'clang':
       cxx.linkflags  += ['-lgcc_eh']
     if cxx.like('gcc'):
-      self.stdcxx_path = self.invokeCompiler(['-m32', '-print-file-name=' + 'libstdc++.a'])[0]
+      arch_flag = {
+        'i386': ['-m32'],
+        'amd64': ['-m64'],
+        'aarch64': [],
+      }[self.target_arch]
+      self.stdcxx_path = self.invokeCompiler(arch_flag + ['-print-file-name=' + 'libstdc++.a'])[0]
 
   def configure_mac(self, cxx):
     cxx.defines += ['OSX', '_OSX', 'POSIX']
@@ -332,9 +376,14 @@ class AMXXConfig(object):
       '-mmacosx-version-min=10.7',
       '-Wno-address-of-packed-member',
     ]
+    mac_arch = {
+      'i386': 'i386',
+      'amd64': 'x86_64',
+      'aarch64': 'arm64',
+    }[self.target_arch]
     cxx.linkflags += [
       '-mmacosx-version-min=10.7',
-      '-arch', 'i386',
+      '-arch', mac_arch,
       '-lstdc++',
       '-stdlib=libc++',
       '-framework', 'CoreServices',
@@ -394,7 +443,7 @@ class AMXXConfig(object):
     if builder.target_platform == 'mac' or builder.target_platform == 'windows':
       name = name + '_mm'
     elif builder.target_platform == 'linux':
-      name = name + '_mm_i386'
+      name = '{0}_mm_{1}'.format(name, self.target_arch)
     binary = context.compiler.Library(name)
     self.ConfigureForModule(context, binary.compiler)
     return self.AddVersioning(binary)
@@ -403,7 +452,7 @@ class AMXXConfig(object):
     if builder.target_platform == 'mac' or builder.target_platform == 'windows':
       name = name + '_amxx'
     elif builder.target_platform == 'linux':
-      name = name + '_amxx_i386'
+      name = '{0}_amxx_{1}'.format(name, self.target_arch)
     binary = context.compiler.Library(name)
     self.ConfigureForModule(context, binary.compiler)
     return self.AddVersioning(binary)
@@ -413,12 +462,15 @@ class AMXXConfig(object):
     return self.AddVersioning(binary)
 
   def AddAssembly(self, context, binary, input_file, output_file, includes=[], extra_argv=[]):
+    if self.target_arch == 'aarch64':
+      raise Exception('AddAssembly: NASM does not target aarch64; callers must skip on this arch')
+    nasm_arch = {'i386': '32', 'amd64': '64'}[self.target_arch]
     if builder.target_platform == 'windows':
-      obj_type = 'win32'
+      obj_type = 'win' + nasm_arch
     elif builder.target_platform == 'linux':
-      obj_type = 'elf32'
+      obj_type = 'elf' + nasm_arch
     elif builder.target_platform == 'mac':
-      obj_type = 'macho32'
+      obj_type = 'macho' + nasm_arch
 
     input_path = os.path.join(context.currentSourcePath, input_file)
     output_path = output_file
@@ -443,6 +495,7 @@ class AMXXConfig(object):
     binary.compiler.linkflags += [output_nodes[0]]
 
 AMXX = AMXXConfig()
+AMXX.detectTargetArch()
 AMXX.detectProductVersion()
 AMXX.detectMetamod()
 AMXX.detectHlsdk()
@@ -472,43 +525,58 @@ AMXX.utf8rewind = builder.RunScript(
   'third_party/utf8rewind/AMBuilder'
 )
 
-builder.RunBuildScripts(
-  [
-    'amxmodx/AMBuilder',
+core_scripts = [
+  'amxmodx/AMBuilder',
+]
+# The Pawn compiler (amxxpc + libpc300) is a developer tool, not a
+# runtime artifact. It contains 32-bit-cell-VM int-to-pointer casts
+# that need a separate cleanup before it can build 64-bit; until that
+# happens, build it only on i386 so cross-arch development still has a
+# working compiler on traditional dev hosts.
+if AMXX.target_arch == 'i386':
+  core_scripts += [
     'compiler/amxxpc/AMBuilder',
     'compiler/libpc300/AMBuilder',
-    'modules/cstrike/cstrike/AMBuilder',
-    'modules/cstrike/csx/AMBuilder',
-    'modules/dod/dodfun/AMBuilder',
-    'modules/dod/dodx/AMBuilder',
-    'modules/engine/AMBuilder',
-    'modules/fakemeta/AMBuilder',
-    'modules/fun/AMBuilder',
-    'modules/geoip/AMBuilder',
-    'modules/hamsandwich/AMBuilder',
-    'modules/json/AMBuilder',
-    'modules/mysqlx/AMBuilder',
-    'modules/ns/AMBuilder',
-    'modules/nvault/AMBuilder',
-    'modules/regex/AMBuilder',
-    'modules/sockets/AMBuilder',
-    'modules/sqlite/AMBuilder',
-    'modules/tfcx/AMBuilder',
-    'modules/ts/tsfun/AMBuilder',
-    'modules/ts/tsx/AMBuilder',
-  ],
-  { 'AMXX': AMXX }
-)
+  ]
+
+module_scripts = [
+  'modules/cstrike/cstrike/AMBuilder',
+  'modules/cstrike/csx/AMBuilder',
+  'modules/dod/dodfun/AMBuilder',
+  'modules/dod/dodx/AMBuilder',
+  'modules/engine/AMBuilder',
+  'modules/fakemeta/AMBuilder',
+  'modules/fun/AMBuilder',
+  'modules/geoip/AMBuilder',
+  'modules/hamsandwich/AMBuilder',
+  'modules/json/AMBuilder',
+  'modules/mysqlx/AMBuilder',
+  'modules/ns/AMBuilder',
+  'modules/nvault/AMBuilder',
+  'modules/sockets/AMBuilder',
+  'modules/sqlite/AMBuilder',
+  'modules/tfcx/AMBuilder',
+  'modules/ts/tsfun/AMBuilder',
+  'modules/ts/tsx/AMBuilder',
+]
+# regex links a prebuilt libpcre.a that ships only as i386 in
+# modules/regex/lib_linux/. Until per-arch PCRE statics exist (rebuild
+# from tools/pcre/), exclude on non-i386.
+if AMXX.target_arch == 'i386':
+  module_scripts.append('modules/regex/AMBuilder')
+
+builder.RunBuildScripts(core_scripts + module_scripts, { 'AMXX': AMXX })
 
 # The csstats.dat reader is Windows-only.
 if builder.target_platform == 'windows':
   builder.RunScript('modules/cstrike/csx/WinCSX/AMBuilder', { 'AMXX': AMXX })
 
 if builder.backend == 'amb2':
-  builder.RunBuildScripts([
-      'plugins/AMBuilder',
-      'support/PackageScript',
-    ],
-    { 'AMXX': AMXX }
-  )
+  packaging_scripts = []
+  # Plugins compile via amxxpc/libpc300; skip on arches where the compiler
+  # isn't built (see core_scripts gate above).
+  if AMXX.target_arch == 'i386':
+    packaging_scripts.append('plugins/AMBuilder')
+  packaging_scripts.append('support/PackageScript')
+  builder.RunBuildScripts(packaging_scripts, { 'AMXX': AMXX })
 

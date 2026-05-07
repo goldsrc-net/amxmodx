@@ -773,6 +773,10 @@ bool ConvertModuleName(const char *pathString, char *path)
 				{
 					foundAmxx = true;
 					break;
+				} else if (strncmp(p, "aarch64.so", 10) == 0)
+				{
+					foundAmxx = true;
+					break;
 				} else if (p[0] == 'i') {
 					p++;
 					if (isdigit(p[0]) && p[1] == '8' && p[2] == '6')
@@ -808,7 +812,9 @@ bool ConvertModuleName(const char *pathString, char *path)
 	auto length = ke::path::Format(path, PLATFORM_MAX_PATH, "%s/%s_amxx", orig_path, tmpname);
 
 #if defined PLATFORM_LINUX
-# if defined AMD64 || PAWN_CELL_SIZE == 64
+# if defined(__aarch64__)
+	length += strncopy(path + length, "_aarch64", PLATFORM_MAX_PATH - length);
+# elif defined AMD64 || PAWN_CELL_SIZE == 64
 	length += strncopy(path + length, "_amd64", PLATFORM_MAX_PATH - length);
 # else
 	length += ke::SafeSprintf(path + length, PLATFORM_MAX_PATH - length, "_i%c86", iDigit);

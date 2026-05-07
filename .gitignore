@@ -88,3 +88,4 @@ plugins/compiled/
 *.amxx
 
 build_deps/
+build_*/
