@@ -10,9 +10,15 @@
 #include "CvarManager.h"
 #include "amxmodx.h"
 #include "nongpl_matches.h"
+#include "AMXModulePtrHandle.h"
 
 char CVarTempBuffer[64];
 const char *invis_cvar_list[5] ={ "amxmodx_version", "amxmodx_modules", "amx_debug", "amx_mldebug", "amx_client_languages" };
+
+// Cell-sized handles for cvar_t* / AutoForward* returned to plugins.
+// On 64-bit hosts a native pointer doesn't fit in a cell.
+static PtrHandleTable<cvar_t>      g_cvar_handles;
+static PtrHandleTable<AutoForward> g_cvarhook_handles;
 
 // create_cvar(const name[], const default_value[], flags = 0, const description[] = "", bool:has_min = false, Float:min_val = 0.0, bool:has_max = false, Float:max_val = 0.0)
 static cell AMX_NATIVE_CALL create_cvar(AMX *amx, cell *params)
@@ -57,7 +63,7 @@ static cell AMX_NATIVE_CALL create_cvar(AMX *amx, cell *params)
 		g_CvarManager.SetCvarMin(info, hasMin, minVal, plugin->getId());
 		g_CvarManager.SetCvarMax(info, hasMax, maxVal, plugin->getId());
 
-		return reinterpret_cast<cell>(info->var);
+		return g_cvar_handles.find_or_alloc(info->var);
 	}
 
 	return 0;
@@ -84,7 +90,7 @@ static cell AMX_NATIVE_CALL register_cvar(AMX *amx, cell *params)
 
 	if (info)
 	{
-		return reinterpret_cast<cell>(info->var);
+		return g_cvar_handles.find_or_alloc(info->var);
 	}
 
 	return 0;
@@ -105,13 +111,13 @@ static cell AMX_NATIVE_CALL get_cvar_pointer(AMX *amx, cell *params)
 
 	CvarInfo* info = g_CvarManager.FindCvar(name);
 
-	return reinterpret_cast<cell>(info ? info->var : 0);
+	return info ? g_cvar_handles.find_or_alloc(info->var) : 0;
 }
 
 // hook_cvar_change(cvarHandle, const callback[])
 static cell AMX_NATIVE_CALL hook_cvar_change(AMX *amx, cell *params)
 {
-	cvar_t* var = reinterpret_cast<cvar_t*>(params[1]);
+	cvar_t* var = g_cvar_handles.get(params[1]);
 
 	if (!var)
 	{
@@ -128,13 +134,13 @@ static cell AMX_NATIVE_CALL hook_cvar_change(AMX *amx, cell *params)
 		return 0;
 	}
 
-	return reinterpret_cast<cell>(forward);
+	return g_cvarhook_handles.alloc(forward);
 }
 
 // enable_cvar_hook(cvarhook:handle);
 static cell AMX_NATIVE_CALL enable_cvar_hook(AMX *amx, cell *params)
 {
-	AutoForward* forward = reinterpret_cast<AutoForward*>(params[1]);
+	AutoForward* forward = g_cvarhook_handles.get(params[1]);
 
 	if (!forward)
 	{
@@ -150,7 +156,7 @@ static cell AMX_NATIVE_CALL enable_cvar_hook(AMX *amx, cell *params)
 // disable_cvar_hook(cvarhook:handle);
 static cell AMX_NATIVE_CALL disable_cvar_hook(AMX *amx, cell *params)
 {
-	AutoForward* forward = reinterpret_cast<AutoForward*>(params[1]);
+	AutoForward* forward = g_cvarhook_handles.get(params[1]);
 
 	if (!forward)
 	{
@@ -284,7 +290,7 @@ static cell AMX_NATIVE_CALL set_cvar_string(AMX *amx, cell *params)
 // get_pcvar_flags(pcvar)
 static cell AMX_NATIVE_CALL get_pcvar_flags(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -297,7 +303,7 @@ static cell AMX_NATIVE_CALL get_pcvar_flags(AMX *amx, cell *params)
 // Float:get_pcvar_float(pcvar)
 static cell AMX_NATIVE_CALL get_pcvar_float(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -310,7 +316,7 @@ static cell AMX_NATIVE_CALL get_pcvar_float(AMX *amx, cell *params)
 // get_pcvar_num(pcvar)
 static cell AMX_NATIVE_CALL get_pcvar_num(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -329,7 +335,7 @@ static cell AMX_NATIVE_CALL get_pcvar_bool(AMX *amx, cell *params)
 // get_pcvar_string(pcvar, string[], maxlen)
 static cell AMX_NATIVE_CALL get_pcvar_string(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -342,7 +348,7 @@ static cell AMX_NATIVE_CALL get_pcvar_string(AMX *amx, cell *params)
 // get_pcvar_bounds(pcvar, CvarBounds:type, &Float:value)
 static cell AMX_NATIVE_CALL get_pcvar_bounds(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	CvarInfo* info = nullptr;
 
 	if (!ptr || !(info = g_CvarManager.FindCvar(ptr->name)))
@@ -377,7 +383,7 @@ static cell AMX_NATIVE_CALL get_pcvar_bounds(AMX *amx, cell *params)
 // bind_pcvar_float(pcvar, &Float:var)
 static cell AMX_NATIVE_CALL bind_pcvar_float(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	CvarInfo* info = nullptr;
 
 	if (!ptr || !(info = g_CvarManager.FindCvar(ptr->name)))
@@ -392,7 +398,7 @@ static cell AMX_NATIVE_CALL bind_pcvar_float(AMX *amx, cell *params)
 // bind_pcvar_num(pcvar, &any:var)
 static cell AMX_NATIVE_CALL bind_pcvar_num(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	CvarInfo* info = nullptr;
 
 	if (!ptr || !(info = g_CvarManager.FindCvar(ptr->name)))
@@ -407,7 +413,7 @@ static cell AMX_NATIVE_CALL bind_pcvar_num(AMX *amx, cell *params)
 // bind_pcvar_string(pcvar, any:var[], varlen)
 static cell AMX_NATIVE_CALL bind_pcvar_string(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	CvarInfo* info = nullptr;
 
 	if (!ptr || !(info = g_CvarManager.FindCvar(ptr->name)))
@@ -422,7 +428,7 @@ static cell AMX_NATIVE_CALL bind_pcvar_string(AMX *amx, cell *params)
 // set_pcvar_flags(pcvar, flags)
 static cell AMX_NATIVE_CALL set_pcvar_flags(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -437,7 +443,7 @@ static cell AMX_NATIVE_CALL set_pcvar_flags(AMX *amx, cell *params)
 // set_pcvar_float(pcvar, Float:num)
 static cell AMX_NATIVE_CALL set_pcvar_float(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -453,7 +459,7 @@ static cell AMX_NATIVE_CALL set_pcvar_float(AMX *amx, cell *params)
 // set_pcvar_num(pcvar, num)
 static cell AMX_NATIVE_CALL set_pcvar_num(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -469,7 +475,7 @@ static cell AMX_NATIVE_CALL set_pcvar_num(AMX *amx, cell *params)
 // set_pcvar_string(pcvar, const string[])
 static cell AMX_NATIVE_CALL set_pcvar_string(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	if (!ptr)
 	{
 		LogError(amx, AMX_ERR_NATIVE, "Invalid CVAR pointer");
@@ -486,7 +492,7 @@ static cell AMX_NATIVE_CALL set_pcvar_string(AMX *amx, cell *params)
 // set_pcvar_bounds(pcvar, CvarBounds:type, bool:set, Float:value = 0.0)
 static cell AMX_NATIVE_CALL set_pcvar_bounds(AMX *amx, cell *params)
 {
-	cvar_t *ptr = reinterpret_cast<cvar_t *>(params[1]);
+	cvar_t *ptr = g_cvar_handles.get(params[1]);
 	CvarInfo* info = nullptr;
 
 	if (!ptr || !(info = g_CvarManager.FindCvar(ptr->name)))
@@ -563,7 +569,7 @@ static cell AMX_NATIVE_CALL get_plugins_cvar(AMX *amx, cell *params)
 		set_amxstring(amx, params[2], info->name.chars(), params[3]);
 		*get_amxaddr(amx, params[4]) = info->var->flags;
 		*get_amxaddr(amx, params[5]) = info->pluginId;
-		*get_amxaddr(amx, params[6]) = reinterpret_cast<cell>(info->var);
+		*get_amxaddr(amx, params[6]) = g_cvar_handles.find_or_alloc(info->var);
 
 		if (*params / sizeof(cell) >= 7)
 		{

@@ -13,7 +13,10 @@
 
 #include "fakemeta_amxx.h"
 #include "sh_stack.h"
+#include "fm_handles.h"
 #include <resdk/mod_regamedll_api.h>
+
+PtrHandleTable<void> g_fm_ptr_handles;
 
 IGameConfig *CommonConfig;
 IGameConfig *GamerulesConfig;

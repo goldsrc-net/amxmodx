@@ -945,7 +945,7 @@ static cell AMX_NATIVE_CALL engfunc(AMX *amx, cell *params)
 		index = cRet[0];
 		CHECK_ENTITY(index);
 		cRet = MF_GetAmxAddr(amx, params[3]);
-		pset = (unsigned char *)cRet[0];
+		pset = (unsigned char *)pdata_cell_to_pointer(cRet[0]);
 		return (*g_engfuncs.pfnCheckVisibility)(TypeConversion.id_to_edict(index), pset);
 
 		// pfnGetCurrentPlayer
@@ -1078,7 +1078,7 @@ static cell AMX_NATIVE_CALL engfunc(AMX *amx, cell *params)
 		}
 
 		temp = (*g_engfuncs.pfnGetInfoKeyBuffer)((index == -1) ? NULL : TypeConversion.id_to_edict(index));
-		return reinterpret_cast<cell>(temp);
+		return pdata_pointer_to_cell(temp);
 	case EngFunc_AlertMessage:			// void )			(ALERT_TYPE atype, char *szFmt, ...);
 		cRet = MF_GetAmxAddr(amx, params[2]);
 		iparam1 = cRet[0];

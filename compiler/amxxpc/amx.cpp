@@ -3468,7 +3468,11 @@ int AMXAPI amx_Exec(AMX *amx, cell *retval, int index)
       amx->hea=hea;
       amx->frm=frm;
       amx->stk=stk;
-      pri=((AMX_NATIVE)offs)(amx,(cell *)(data+(int)stk));
+      /* SYSREQ.D fast-path: only valid when sizeof(void*) <= sizeof(cell);
+       * on 64-bit hosts the SYSREQ.C->SYSREQ.D patching is gated off in
+       * amx_Callback, so this path never runs there. The uintptr_t
+       * intermediate suppresses the int->ptr-cast warning. */
+      pri=((AMX_NATIVE)(uintptr_t)offs)(amx,(cell *)(data+(int)stk));
       if (amx->error!=AMX_ERR_NONE) {
         if (amx->error==AMX_ERR_SLEEP) {
           amx->pri=pri;

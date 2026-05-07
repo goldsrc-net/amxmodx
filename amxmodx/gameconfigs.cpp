@@ -10,8 +10,13 @@
 #include "gameconfigs.h"
 #include "amxmodx.h"
 #include "CGameConfigs.h"
+#include "AMXModulePtrHandle.h"
 
 NativeHandle<GameConfigNative> GameConfigHandle;
+
+// Cell-sized handles for GameConfGetAddress() return values; see
+// AMXModulePtrHandle.h. Plugin gets a 1-based handle, opaque.
+static PtrHandleTable<void> g_gameconf_addr_handles;
 
 // native GameConfig:LoadGameConfigFile(const file[]);
 static cell AMX_NATIVE_CALL LoadGameConfigFile(AMX *amx, cell *params)
@@ -138,7 +143,7 @@ static cell AMX_NATIVE_CALL GameConfGetAddress(AMX *amx, cell *params)
 		return 0;
 	}
 
-	return reinterpret_cast<cell>(value);
+	return g_gameconf_addr_handles.find_or_alloc(value);
 }
 
 // native CloseGameConfigFile(&GameConfig:handle);

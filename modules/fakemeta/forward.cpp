@@ -12,6 +12,7 @@
 //
 
 #include "fakemeta_amxx.h"
+#include "fm_handles.h"
 
 ke::Vector<int> Engine[ENGFUNC_NUM+10];
 ke::Vector<int> EnginePost[ENGFUNC_NUM + 10];
@@ -100,13 +101,13 @@ SIMPLE_INT_HOOK_CONSTSTRING(PrecacheSound);
 
 void ClientUserInfoChanged(edict_t *e, char *infobuffer)
 {
-	FM_ENG_HANDLE(FM_ClientUserInfoChanged, (Engine[FM_ClientUserInfoChanged].at(i), (cell)ENTINDEX(e), (cell)infobuffer));
+	FM_ENG_HANDLE(FM_ClientUserInfoChanged, (Engine[FM_ClientUserInfoChanged].at(i), (cell)ENTINDEX(e), fm_ptr_to_cell(infobuffer)));
 	RETURN_META(mswi(lastFmRes));
 }
 
 void ClientUserInfoChanged_post(edict_t *e, char *infobuffer)
 {
-	FM_ENG_HANDLE_POST(FM_ClientUserInfoChanged, (EnginePost[FM_ClientUserInfoChanged].at(i), (cell)ENTINDEX(e), (cell)infobuffer)); 
+	FM_ENG_HANDLE_POST(FM_ClientUserInfoChanged, (EnginePost[FM_ClientUserInfoChanged].at(i), (cell)ENTINDEX(e), fm_ptr_to_cell(infobuffer))); 
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -129,7 +130,7 @@ void TraceLine(const float *v1, const float *v2, int fNoMonsters, edict_t *pentT
 	gfm_tr=ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceLine, (Engine[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip) , (cell)ptr));
+	FM_ENG_HANDLE(FM_TraceLine, (Engine[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip) , fm_ptr_to_cell(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -138,21 +139,21 @@ void TraceLine_post(const float *v1, const float *v2, int fNoMonsters, edict_t *
 	gfm_tr=ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceLine, (EnginePost[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), (cell)ptr));
+	FM_ENG_HANDLE_POST(FM_TraceLine, (EnginePost[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
 void TraceToss(edict_t* pent, edict_t* pentToIgnore, TraceResult *ptr)
 {
 	gfm_tr = ptr;
-	FM_ENG_HANDLE(FM_TraceToss, (Engine[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), (cell)ptr));
+	FM_ENG_HANDLE(FM_TraceToss, (Engine[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), fm_ptr_to_cell(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
 void TraceToss_post(edict_t* pent, edict_t* pentToIgnore, TraceResult *ptr)
 {
 	gfm_tr = ptr;
-	FM_ENG_HANDLE_POST(FM_TraceToss, (EnginePost[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), (cell)ptr));
+	FM_ENG_HANDLE_POST(FM_TraceToss, (EnginePost[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), fm_ptr_to_cell(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -161,7 +162,7 @@ int TraceMonsterHull(edict_t *pEdict, const float *v1, const float *v2, int fNoM
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceMonsterHull, (Engine[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), (cell)ptr));
+	FM_ENG_HANDLE(FM_TraceMonsterHull, (Engine[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
 	RETURN_META_VALUE(mswi(lastFmRes), (int)mlCellResult);
 }
 
@@ -171,7 +172,7 @@ int TraceMonsterHull_post(edict_t *pEdict, const float *v1, const float *v2, int
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
 	origCellRet = META_RESULT_ORIG_RET(int);
-	FM_ENG_HANDLE_POST(FM_TraceMonsterHull, (EnginePost[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), (cell)ptr));
+	FM_ENG_HANDLE_POST(FM_TraceMonsterHull, (EnginePost[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
 	RETURN_META_VALUE(MRES_IGNORED, (int)mlCellResult);
 }
 
@@ -180,7 +181,7 @@ void TraceHull(const float *v1, const float *v2, int fNoMonsters, int hullNumber
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceHull, (Engine[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), (cell)ptr));
+	FM_ENG_HANDLE(FM_TraceHull, (Engine[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -189,7 +190,7 @@ void TraceHull_post(const float *v1, const float *v2, int fNoMonsters, int hullN
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceHull, (EnginePost[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), (cell)ptr));
+	FM_ENG_HANDLE_POST(FM_TraceHull, (EnginePost[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -198,7 +199,7 @@ void TraceModel(const float *v1, const float *v2, int hullNumber, edict_t *pent,
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceModel, (Engine[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), (cell)ptr));
+	FM_ENG_HANDLE(FM_TraceModel, (Engine[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), fm_ptr_to_cell(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -207,7 +208,7 @@ void TraceModel_post(const float *v1, const float *v2, int hullNumber, edict_t *
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceModel, (EnginePost[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), (cell)ptr));
+	FM_ENG_HANDLE_POST(FM_TraceModel, (EnginePost[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), fm_ptr_to_cell(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -233,7 +234,7 @@ void TraceSphere(const float *v1, const float *v2, int fNoMonsters, float radius
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceSphere, (Engine[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), (cell)ptr));
+	FM_ENG_HANDLE(FM_TraceSphere, (Engine[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -242,7 +243,7 @@ void TraceSphere_post(const float *v1, const float *v2, int fNoMonsters, float r
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceSphere, (EnginePost[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), (cell)ptr));
+	FM_ENG_HANDLE_POST(FM_TraceSphere, (EnginePost[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -259,13 +260,13 @@ typedef struct KeyValueData_s
 */
 void KeyValue(edict_t* entity, KeyValueData* data)
 {
-	FM_ENG_HANDLE(FM_KeyValue, (Engine[FM_KeyValue].at(i), (cell)ENTINDEX(entity), (cell)(data)));
+	FM_ENG_HANDLE(FM_KeyValue, (Engine[FM_KeyValue].at(i), (cell)ENTINDEX(entity), fm_ptr_to_cell(data)));
 	RETURN_META(mswi(lastFmRes));
 }
 
 void KeyValue_post(edict_t* entity, KeyValueData* data)
 {
-	FM_ENG_HANDLE_POST(FM_KeyValue, (EnginePost[FM_KeyValue].at(i), (cell)ENTINDEX(entity), (cell)(data)));
+	FM_ENG_HANDLE_POST(FM_KeyValue, (EnginePost[FM_KeyValue].at(i), (cell)ENTINDEX(entity), fm_ptr_to_cell(data)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -582,14 +583,14 @@ void BuildSoundMsg_post(edict_t *entity, int channel, const char *sample, float 
 
 int CheckVisibility(const edict_t *entity, unsigned char *pset)
 {
-	FM_ENG_HANDLE(FM_CheckVisibility, (Engine[FM_CheckVisibility].at(i), (cell)ENTINDEX(entity), (cell)pset));
+	FM_ENG_HANDLE(FM_CheckVisibility, (Engine[FM_CheckVisibility].at(i), (cell)ENTINDEX(entity), fm_ptr_to_cell(pset)));
 	RETURN_META_VALUE(mswi(lastFmRes), (int)mlCellResult);
 }
 
 int CheckVisibility_post(const edict_t *entity, unsigned char *pset)
 {
 	origCellRet = META_RESULT_ORIG_RET(int);
-	FM_ENG_HANDLE(FM_CheckVisibility, (Engine[FM_CheckVisibility].at(i), (cell)ENTINDEX(entity), (cell)pset));
+	FM_ENG_HANDLE(FM_CheckVisibility, (Engine[FM_CheckVisibility].at(i), (cell)ENTINDEX(entity), fm_ptr_to_cell(pset)));
 	RETURN_META_VALUE(MRES_IGNORED, (int)mlCellResult);
 }
 
@@ -623,7 +624,7 @@ SIMPLE_INT_HOOK_CONSTSTRING(IsMapValid);
 int CreateInstancedBaseline(int classname, struct entity_state_s *baseline)
 {
 	g_es_hook = baseline;
-	FM_ENG_HANDLE(FM_CreateInstancedBaseline, (Engine[FM_CreateInstancedBaseline].at(i), (cell)classname, (cell)baseline));
+	FM_ENG_HANDLE(FM_CreateInstancedBaseline, (Engine[FM_CreateInstancedBaseline].at(i), (cell)classname, fm_ptr_to_cell(baseline)));
 	RETURN_META_VALUE(mswi(lastFmRes), (int)mlCellResult);
 }
 
@@ -631,21 +632,21 @@ int CreateInstancedBaseline_post(int classname, struct entity_state_s *baseline)
 {
 	g_es_hook = baseline;
 	origCellRet = META_RESULT_ORIG_RET(int);
-	FM_ENG_HANDLE_POST(FM_CreateInstancedBaseline, (EnginePost[FM_CreateInstancedBaseline].at(i), (cell)classname, (cell)baseline));
+	FM_ENG_HANDLE_POST(FM_CreateInstancedBaseline, (EnginePost[FM_CreateInstancedBaseline].at(i), (cell)classname, fm_ptr_to_cell(baseline)));
 	RETURN_META_VALUE(MRES_IGNORED, (int)mlCellResult);
 }
 
 char *GetInfoKeyBuffer(edict_t *e)
 {
 	FM_ENG_HANDLE(FM_GetInfoKeyBuffer, (Engine[FM_GetInfoKeyBuffer].at(i), (cell)ENTINDEX(e)));
-	RETURN_META_VALUE(mswi(lastFmRes), reinterpret_cast<char *>(mlCellResult));
+	RETURN_META_VALUE(mswi(lastFmRes), fm_cell_to_ptr<char>(mlCellResult));
 }
 
 char *GetInfoKeyBuffer_post(edict_t *e)
 {
-	origCellRet = reinterpret_cast<cell>(META_RESULT_ORIG_RET(char *));
+	origCellRet = fm_ptr_to_cell(META_RESULT_ORIG_RET(char *));
 	FM_ENG_HANDLE(FM_GetInfoKeyBuffer, (Engine[FM_GetInfoKeyBuffer].at(i), (cell)ENTINDEX(e)));
-	RETURN_META_VALUE(MRES_IGNORED, reinterpret_cast<char *>(mlCellResult));
+	RETURN_META_VALUE(MRES_IGNORED, fm_cell_to_ptr<char>(mlCellResult));
 }
 
 void ClientPrintf(edict_t* pEdict, PRINT_TYPE ptype, const char *szMsg)
@@ -747,21 +748,21 @@ SIMPLE_INT_HOOK_VOID(AllowLagCompensation);
 void UpdateClientData(const struct edict_s *ent, int sendweapons, struct clientdata_s *cd)
 {
 	g_cd_hook = cd;
-	FM_ENG_HANDLE(FM_UpdateClientData, (Engine[FM_UpdateClientData].at(i), (cell)ENTINDEX(ent), (cell)sendweapons, (cell)cd));
+	FM_ENG_HANDLE(FM_UpdateClientData, (Engine[FM_UpdateClientData].at(i), (cell)ENTINDEX(ent), (cell)sendweapons, fm_ptr_to_cell(cd)));
 	RETURN_META(mswi(lastFmRes));
 }
 
 void UpdateClientData_post(const struct edict_s *ent, int sendweapons, struct clientdata_s *cd)
 {
 	g_cd_hook = cd;
-	FM_ENG_HANDLE_POST(FM_UpdateClientData, (EnginePost[FM_UpdateClientData].at(i), (cell)ENTINDEX(ent), (cell)sendweapons, (cell)cd));
+	FM_ENG_HANDLE_POST(FM_UpdateClientData, (EnginePost[FM_UpdateClientData].at(i), (cell)ENTINDEX(ent), (cell)sendweapons, fm_ptr_to_cell(cd)));
 	RETURN_META(MRES_IGNORED);
 }
 
 int AddToFullPack(struct entity_state_s *state, int e, edict_t *ent, edict_t *host, int hostflags, int player, unsigned char *pSet)
 {
 	g_es_hook = state;
-	FM_ENG_HANDLE(FM_AddToFullPack, (Engine[FM_AddToFullPack].at(i), (cell)state, (cell)e, (cell)ENTINDEX(ent), (cell)ENTINDEX(host), (cell)hostflags, (cell)player, (cell)pSet));
+	FM_ENG_HANDLE(FM_AddToFullPack, (Engine[FM_AddToFullPack].at(i), fm_ptr_to_cell(state), (cell)e, (cell)ENTINDEX(ent), (cell)ENTINDEX(host), (cell)hostflags, (cell)player, fm_ptr_to_cell(pSet)));
 	RETURN_META_VALUE(mswi(lastFmRes), (int)mlCellResult);
 }
 
@@ -769,21 +770,21 @@ int AddToFullPack_post(struct entity_state_s *state, int e, edict_t *ent, edict_
 {
 	g_es_hook = state;
 	origCellRet = META_RESULT_ORIG_RET(int);
-	FM_ENG_HANDLE_POST(FM_AddToFullPack, (EnginePost[FM_AddToFullPack].at(i), (cell)state, (cell)e, (cell)ENTINDEX(ent), (cell)ENTINDEX(host), (cell)hostflags, (cell)player, (cell)pSet));
+	FM_ENG_HANDLE_POST(FM_AddToFullPack, (EnginePost[FM_AddToFullPack].at(i), fm_ptr_to_cell(state), (cell)e, (cell)ENTINDEX(ent), (cell)ENTINDEX(host), (cell)hostflags, (cell)player, fm_ptr_to_cell(pSet)));
 	RETURN_META_VALUE(MRES_IGNORED, (int)mlCellResult);
 }
 
 void CmdStart(const edict_t *player, const struct usercmd_s *cmd, unsigned int random_seed)
 {
 	g_uc_hook = const_cast<usercmd_t *>(cmd);
-	FM_ENG_HANDLE(FM_CmdStart, (Engine[FM_CmdStart].at(i), (cell)ENTINDEX(player), (cell)cmd, (cell)random_seed));
+	FM_ENG_HANDLE(FM_CmdStart, (Engine[FM_CmdStart].at(i), (cell)ENTINDEX(player), fm_ptr_to_cell(cmd), (cell)random_seed));
 	RETURN_META(mswi(lastFmRes));
 }
 
 void CmdStart_post(const edict_t *player, const struct usercmd_s *cmd, unsigned int random_seed)
 {
 	g_uc_hook = const_cast<usercmd_t *>(cmd);
-	FM_ENG_HANDLE_POST(FM_CmdStart, (EnginePost[FM_CmdStart].at(i), (cell)ENTINDEX(player), (cell)cmd, (cell)random_seed));
+	FM_ENG_HANDLE_POST(FM_CmdStart, (EnginePost[FM_CmdStart].at(i), (cell)ENTINDEX(player), fm_ptr_to_cell(cmd), (cell)random_seed));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -792,7 +793,7 @@ void CreateBaseline(int player, int eindex, struct entity_state_s *baseline, str
 	g_es_hook = baseline;
 	PREPARE_VECTOR(player_mins);
 	PREPARE_VECTOR(player_maxs);
-	FM_ENG_HANDLE(FM_CreateBaseline, (Engine[FM_CreateBaseline].at(i), (cell)player, (cell)eindex, (cell)baseline, (cell)ENTINDEX(entity), (cell)playermodelindex, p_player_mins, p_player_maxs));
+	FM_ENG_HANDLE(FM_CreateBaseline, (Engine[FM_CreateBaseline].at(i), (cell)player, (cell)eindex, fm_ptr_to_cell(baseline), (cell)ENTINDEX(entity), (cell)playermodelindex, p_player_mins, p_player_maxs));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -801,7 +802,7 @@ void CreateBaseline_post(int player, int eindex, struct entity_state_s *baseline
 	g_es_hook = baseline;
 	PREPARE_VECTOR(player_mins);
 	PREPARE_VECTOR(player_maxs);
-	FM_ENG_HANDLE_POST(FM_CreateBaseline, (EnginePost[FM_CreateBaseline].at(i), (cell)player, (cell)eindex, (cell)baseline, (cell)ENTINDEX(entity), (cell)playermodelindex, p_player_mins, p_player_maxs));
+	FM_ENG_HANDLE_POST(FM_CreateBaseline, (EnginePost[FM_CreateBaseline].at(i), (cell)player, (cell)eindex, fm_ptr_to_cell(baseline), (cell)ENTINDEX(entity), (cell)playermodelindex, p_player_mins, p_player_maxs));
 	RETURN_META(MRES_IGNORED);
 }
 

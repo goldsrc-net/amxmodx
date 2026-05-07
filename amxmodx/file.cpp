@@ -10,8 +10,18 @@
 #include "amxmodx.h"
 #include "CFileSystem.h"
 #include "CLibrarySys.h"
+#include "AMXModulePtrHandle.h"
 
 using namespace ke;
+
+struct DirectoryHandle;
+
+// Cell-sized handles for FileObject / DirectoryHandle returned to
+// plugins. Required on 64-bit hosts (PAWN_CELL_SIZE=32 cannot hold a
+// native pointer). Plugin sees a 1-based opaque index; close/read/
+// write natives resolve it back to the C++ pointer.
+static PtrHandleTable<FileObject>      g_file_handles;
+static PtrHandleTable<DirectoryHandle> g_dir_handles;
 
 // native read_dir(const dirname[], pos, output[], len, &outlen = 0);
 static cell AMX_NATIVE_CALL read_dir(AMX *amx, cell *params)
@@ -347,7 +357,7 @@ static cell AMX_NATIVE_CALL amx_fopen(AMX *amx, cell *params)
 		return 0;
 	}
 
-	return reinterpret_cast<cell>(fp);
+	return g_file_handles.alloc(fp);
 }
 
 #define BLOCK_INT	4
@@ -357,7 +367,7 @@ static cell AMX_NATIVE_CALL amx_fopen(AMX *amx, cell *params)
 // native fwrite_blocks(file, const data[], blocks, mode);
 static cell AMX_NATIVE_CALL amx_fwrite_blocks(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -419,7 +429,7 @@ static cell AMX_NATIVE_CALL amx_fwrite_blocks(AMX *amx, cell *params)
 // native fwrite(file, data, mode);
 static cell AMX_NATIVE_CALL amx_fwrite(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -454,7 +464,7 @@ static cell AMX_NATIVE_CALL amx_fwrite(AMX *amx, cell *params)
 // native fwrite_raw(file, const stream[], blocksize, mode);
 static cell AMX_NATIVE_CALL amx_fwrite_raw(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -469,7 +479,7 @@ static cell AMX_NATIVE_CALL amx_fwrite_raw(AMX *amx, cell *params)
 // native fread_raw(file, stream[], blocksize, blocks);
 static cell AMX_NATIVE_CALL amx_fread_raw(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -484,7 +494,7 @@ static cell AMX_NATIVE_CALL amx_fread_raw(AMX *amx, cell *params)
 // native fread(file, &data, mode);
 static cell AMX_NATIVE_CALL amx_fread(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -524,7 +534,7 @@ static cell AMX_NATIVE_CALL amx_fread(AMX *amx, cell *params)
 // native fread_blocks(file, data[], blocks, mode);
 static cell AMX_NATIVE_CALL amx_fread_blocks(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -588,7 +598,7 @@ static cell AMX_NATIVE_CALL amx_fread_blocks(AMX *amx, cell *params)
 // native fputs(file, const text[], bool:null_term = false);
 static cell AMX_NATIVE_CALL amx_fputs(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -614,7 +624,7 @@ static cell AMX_NATIVE_CALL amx_fputs(AMX *amx, cell *params)
 // native fgets(file, buffer[], maxlength);
 static cell AMX_NATIVE_CALL amx_fgets(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -632,7 +642,7 @@ static cell AMX_NATIVE_CALL amx_fgets(AMX *amx, cell *params)
 // native fseek(file, position, start);
 static cell AMX_NATIVE_CALL amx_fseek(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -645,7 +655,7 @@ static cell AMX_NATIVE_CALL amx_fseek(AMX *amx, cell *params)
 // native ftell(file);
 static cell AMX_NATIVE_CALL amx_ftell(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -658,7 +668,7 @@ static cell AMX_NATIVE_CALL amx_ftell(AMX *amx, cell *params)
 // native fprintf(file, const fmt[], any:...);
 static cell AMX_NATIVE_CALL amx_fprintf(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -687,7 +697,7 @@ static cell AMX_NATIVE_CALL amx_fprintf(AMX *amx, cell *params)
 // native feof(file);
 static cell AMX_NATIVE_CALL amx_feof(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (fp)
 	{
@@ -700,11 +710,12 @@ static cell AMX_NATIVE_CALL amx_feof(AMX *amx, cell *params)
 // native fclose(file);
 static cell AMX_NATIVE_CALL amx_fclose(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (fp)
 	{
 		fp->Close();
+		g_file_handles.free(params[1]);
 	}
 
 	return 1;
@@ -789,7 +800,7 @@ static cell AMX_NATIVE_CALL amx_open_dir(AMX *amx, cell *params)
 
 		*fileType = g_FileSystem->FindIsDirectory(handle) ? FileType_Directory : FileType_File;
 
-		return reinterpret_cast<cell>(new DirectoryHandle(handle));
+		return g_dir_handles.alloc(new DirectoryHandle(handle));
 	}
 
 	CDirectory* dir = g_LibSys.OpenDirectory(build_pathname("%s", path));
@@ -808,18 +819,20 @@ static cell AMX_NATIVE_CALL amx_open_dir(AMX *amx, cell *params)
 	const char* entry = dir->GetEntryName();
 	set_amxstring_utf8(amx, params[2], entry, strlen(entry), params[3]);
 
-	return reinterpret_cast<cell>(new DirectoryHandle(dir));
+	return g_dir_handles.alloc(new DirectoryHandle(dir));
 }
 
 // native close_dir(dirh);
 static cell AMX_NATIVE_CALL amx_close_dir(AMX *amx, cell *params)
 {
-	AutoPtr<DirectoryHandle> p(reinterpret_cast<DirectoryHandle*>(params[1]));
+	AutoPtr<DirectoryHandle> p(g_dir_handles.get(params[1]));
 
 	if (!p)
 	{
 		return 0;
 	}
+
+	g_dir_handles.free(params[1]);
 
 	if (p->valvefs)
 	{
@@ -838,7 +851,7 @@ static cell AMX_NATIVE_CALL amx_close_dir(AMX *amx, cell *params)
 // native next_file(dirh, buffer[], length, &FileType:type = FileType_Unknown);
 static cell AMX_NATIVE_CALL amx_get_dir(AMX *amx, cell *params)
 {
-	DirectoryHandle* p = reinterpret_cast<DirectoryHandle*>(params[1]);
+	DirectoryHandle* p = g_dir_handles.get(params[1]);
 
 	if (!p)
 	{
@@ -899,7 +912,7 @@ static cell AMX_NATIVE_CALL amx_get_dir(AMX *amx, cell *params)
 //native fgetc(file);
 static cell AMX_NATIVE_CALL amx_fgetc(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -919,7 +932,7 @@ static cell AMX_NATIVE_CALL amx_fgetc(AMX *amx, cell *params)
 //native fputc(file, data);
 static cell AMX_NATIVE_CALL amx_fputc(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -939,7 +952,7 @@ static cell AMX_NATIVE_CALL amx_fputc(AMX *amx, cell *params)
 //native ungetc(file, data);
 static cell AMX_NATIVE_CALL amx_ungetc(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -1074,7 +1087,7 @@ static cell LoadFileForMe(AMX *amx, cell *params)
 // native fflush(file);
 static cell AMX_NATIVE_CALL amx_fflush(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (fp)
 	{
@@ -1139,7 +1152,7 @@ static cell SetFilePermissions(AMX *amx, cell *params)
 template <typename T>
 static cell File_ReadTyped(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{
@@ -1162,7 +1175,7 @@ static cell File_ReadTyped(AMX *amx, cell *params)
 template <typename T>
 static cell File_WriteTyped(AMX *amx, cell *params)
 {
-	FileObject* fp = reinterpret_cast<FileObject*>(params[1]);
+	FileObject* fp = g_file_handles.get(params[1]);
 
 	if (!fp)
 	{

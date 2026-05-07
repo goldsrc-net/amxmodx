@@ -50,13 +50,13 @@ cell PSKeyValueI(const char *name, AMX *amx, cell *params)
 
 	ke::SafeSprintf(StrData, sizeof(StrData), "%d", params[2]);
 
-	kvd.szClassName=const_cast<char *>(STRING(reinterpret_cast<edict_t *>(params[1])->v.classname));
+	kvd.szClassName=const_cast<char *>(STRING(INDEXENT(params[1])->v.classname));
 	kvd.szKeyName=name;
 	kvd.szValue=&StrData[0];
 	kvd.fHandled=0;
 	//printf("\"%s\" \"%s\"\n",kvd.szKeyName,kvd.szValue);
 
-	MDLL_KeyValue(reinterpret_cast<edict_t *>(params[1]),&kvd);
+	MDLL_KeyValue(INDEXENT(params[1]),&kvd);
 
 	return 1;
 }
@@ -73,14 +73,14 @@ cell PSKeyValueF(const char *name, AMX *amx, cell *params)
 
 	ke::SafeSprintf(StrData, sizeof(StrData), "%f", amx_ctof2(params[2]));
 
-	kvd.szClassName=const_cast<char *>(STRING(reinterpret_cast<edict_t *>(params[1])->v.classname));
+	kvd.szClassName=const_cast<char *>(STRING(INDEXENT(params[1])->v.classname));
 	kvd.szKeyName=name;
 	kvd.szValue=&StrData[0];
 	kvd.fHandled=0;
 
 	//printf("\"%s\" \"%s\"\n",kvd.szKeyName,kvd.szValue);
 
-	MDLL_KeyValue(reinterpret_cast<edict_t *>(params[1]),&kvd);
+	MDLL_KeyValue(INDEXENT(params[1]),&kvd);
 
 	return 1;
 
@@ -94,13 +94,13 @@ cell PSKeyValueS(const char *name, AMX *amx, cell *params)
 	}
 	KeyValueData kvd;
 
-	kvd.szClassName=const_cast<char *>(STRING(reinterpret_cast<edict_t *>(params[1])->v.classname));
+	kvd.szClassName=const_cast<char *>(STRING(INDEXENT(params[1])->v.classname));
 	kvd.szKeyName=name;
 	kvd.szValue=MF_GetAmxString(amx,params[2],0,NULL);
 	kvd.fHandled=0;
 	//printf("\"%s\" \"%s\"\n",kvd.szKeyName,kvd.szValue);
 
-	MDLL_KeyValue(reinterpret_cast<edict_t *>(params[1]),&kvd);
+	MDLL_KeyValue(INDEXENT(params[1]),&kvd);
 
 	return 1;
 
@@ -186,7 +186,7 @@ static cell AMX_NATIVE_CALL ns_set_ps_max_alpha(AMX *amx, cell *params)
 // Float:pSystemLifetime, Float:pParticleLifetime, pRenderMode, const pPSToGen[], pAnimationSpeed, pSpawnFlags)
 static cell AMX_NATIVE_CALL ns_create_partsys(AMX *amx, cell *params)
 {
-	return (cell)CREATE_NAMED_ENTITY(MAKE_STRING("env_particles_custom"));
+	return ENTINDEX(CREATE_NAMED_ENTITY(MAKE_STRING("env_particles_custom")));
 };
 static cell AMX_NATIVE_CALL ns_spawn_ps(AMX *amx, cell *params)
 {
@@ -196,7 +196,7 @@ static cell AMX_NATIVE_CALL ns_spawn_ps(AMX *amx, cell *params)
 		return 0;
 	}
 
-	edict_t *Ent=reinterpret_cast<edict_t *>(params[1]);
+	edict_t *Ent=INDEXENT(params[1]);
 	MDLL_Spawn(Ent);
 
 	if (!Ent->free)
