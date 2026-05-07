@@ -37,7 +37,7 @@ CForward::CForward(const char *name, ForwardExecType et, int numParams, const Fo
 	m_Name = name;
 }
 
-cell CForward::execute(cell *params, ForwardPreparedArray *preparedArrays)
+cell CForward::execute(intptr_t *params, ForwardPreparedArray *preparedArrays)
 {
 	cell realParams[FORWARD_MAX_PARAMS];
 	cell *physAddrs[FORWARD_MAX_PARAMS];
@@ -107,7 +107,7 @@ cell CForward::execute(cell *params, ForwardPreparedArray *preparedArrays)
 				}
 				else
 				{
-					realParams[i] = params[i];
+					realParams[i] = static_cast<cell>(params[i]);
 				}
 			}
 			
@@ -244,11 +244,11 @@ void CSPForward::Set(const char *funcName, AMX *amx, int numParams, const Forwar
 	m_InExec = false;
 }
 
-cell CSPForward::execute(cell *params, ForwardPreparedArray *preparedArrays)
+cell CSPForward::execute(intptr_t *params, ForwardPreparedArray *preparedArrays)
 {
 	if (isFree)
 		return 0;
-	
+
 	const int STRINGEX_MAXLENGTH = 128;
 
 	cell realParams[FORWARD_MAX_PARAMS];
@@ -490,7 +490,7 @@ bool CForwardMngr::isIdValid(int id) const
 	return (id >= 0) && ((id & 1) ? (static_cast<size_t>(id >> 1) < m_SPForwards.length()) : (static_cast<size_t>(id >> 1) < m_Forwards.length()));
 }
 
-cell CForwardMngr::executeForwards(int id, cell *params)
+cell CForwardMngr::executeForwards(int id, intptr_t *params)
 {
 	int retVal;
 	if (id & 1)
@@ -738,15 +738,15 @@ cell executeForwards(int id, ...)
 	if (!g_forwards.isIdValid(id))
 		return -1;
 
-	cell params[FORWARD_MAX_PARAMS];
-	
+	intptr_t params[FORWARD_MAX_PARAMS];
+
 	int paramsNum = g_forwards.getParamsNum(id);
-	
+
 	va_list argptr;
 	va_start(argptr, id);
 
 	ForwardParam param_type;
-	
+
 	for (int i = 0; i < paramsNum && i < FORWARD_MAX_PARAMS; ++i)
 	{
 		param_type = g_forwards.getParamType(id, i);
@@ -758,19 +758,19 @@ cell executeForwards(int id, ...)
 		else if(param_type == FP_FLOAT_BYREF)
 		{
 			REAL *tmp = reinterpret_cast<REAL *>(va_arg(argptr, double*));
-			params[i] = reinterpret_cast<cell>(tmp);
+			params[i] = reinterpret_cast<intptr_t>(tmp);
 		}
 		else if(param_type == FP_CELL_BYREF)
 		{
 			cell *tmp = reinterpret_cast<cell *>(va_arg(argptr, cell*));
-			params[i] = reinterpret_cast<cell>(tmp);
+			params[i] = reinterpret_cast<intptr_t>(tmp);
 		}
 		else
-			params[i] = (cell)va_arg(argptr, cell);
+			params[i] = (intptr_t)va_arg(argptr, cell);
 	}
-	
+
 	va_end(argptr);
-	
+
 	return g_forwards.executeForwards(id, params);
 }
 

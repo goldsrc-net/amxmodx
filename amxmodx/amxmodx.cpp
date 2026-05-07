@@ -4245,7 +4245,7 @@ static cell AMX_NATIVE_CALL ExecuteForward(AMX *amx, cell *params)
 		cell *phys_addr;
 	};
 
-	cell ps[FORWARD_MAX_PARAMS];
+	intptr_t ps[FORWARD_MAX_PARAMS];
 	allot_info allots[FORWARD_MAX_PARAMS];
 	cell count = params[0] / sizeof(cell);
 	if (count - 2 != g_forwards.getParamsNum(id))
@@ -4269,12 +4269,12 @@ static cell AMX_NATIVE_CALL ExecuteForward(AMX *amx, cell *params)
 				return 0;
 			}
 			strcpy((char *)allots[i-3].phys_addr, tmp);
-			ps[i-3] = (cell)allots[i-3].phys_addr;
+			ps[i-3] = reinterpret_cast<intptr_t>(allots[i-3].phys_addr);
 		}
 		else if (param_type == FP_CELL_BYREF)
 		{
 			cell *temp = get_amxaddr(amx, params[i]);
-			ps[i-3] = reinterpret_cast<cell>(temp);
+			ps[i-3] = reinterpret_cast<intptr_t>(temp);
 		}
 		else
 		{

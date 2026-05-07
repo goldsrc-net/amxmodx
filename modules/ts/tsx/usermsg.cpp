@@ -113,7 +113,7 @@ void Client_TSHealth_End(void* mValue){
 			}
 		}
 		else if ( szCName[0] == 'k' ) {
-			edict_t *pOwner =  (edict_t *)*( (int*)enemy->pvPrivateData + gKnifeOffset );
+			edict_t *pOwner = *( (edict_t **)enemy->pvPrivateData + gKnifeOffset );
 
 			if ( FNullEnt( (edict_t*)pOwner) )
 				return;
