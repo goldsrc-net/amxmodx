@@ -13,6 +13,7 @@
 
 #include "fakemeta_amxx.h"
 #include "sh_stack.h"
+#include "AMXModulePtrHandle.h"
 
 TraceResult g_tr_2;
 
@@ -21,6 +22,11 @@ KVD_Wrapper g_kvd_ext;
 
 ke::Vector<KVD_Wrapper *>g_KVDWs;
 ke::Vector<KVD_Wrapper *>g_FreeKVDWs;
+
+// Cell-sized handles for native pointers passed to plugins. Required
+// on 64-bit hosts where reinterpret_cast<cell>(ptr) truncates.
+static PtrHandleTable<TraceResult> g_tr_handles;
+static PtrHandleTable<KVD_Wrapper> g_kvd_handles;
 
 clientdata_t g_cd_glb;
 entity_state_t g_es_glb;
@@ -32,7 +38,7 @@ static cell AMX_NATIVE_CALL set_tr2(AMX *amx, cell *params)
 	if (params[1] == 0)
 		tr = &g_tr_2;
 	else
-		tr = reinterpret_cast<TraceResult *>(params[1]);
+		tr = g_tr_handles.get(params[1]);
 
 	if (*params / sizeof(cell) < 3)
 	{
@@ -116,7 +122,7 @@ static cell AMX_NATIVE_CALL get_tr2(AMX *amx, cell *params)
 	if (params[1] == 0)
 		tr = &g_tr_2;
 	else
-		tr = reinterpret_cast<TraceResult *>(params[1]);
+		tr = g_tr_handles.get(params[1]);
 
 	cell *ptr;
 
@@ -239,7 +245,7 @@ static cell AMX_NATIVE_CALL set_kvd(AMX *amx, cell *params)
 	KVD_Wrapper *kvdw = nullptr;
 	KeyValueData *kvd = nullptr;
 	
-	KVD_Wrapper *tmpw = reinterpret_cast<KVD_Wrapper *>(params[1]);
+	KVD_Wrapper *tmpw = g_kvd_handles.get(params[1]);
 	if (params[1] == 0 || tmpw == &g_kvd_glb) {
 		kvdw = &g_kvd_glb;
 		kvd = &(kvdw->kvd);
@@ -1223,12 +1229,12 @@ static cell AMX_NATIVE_CALL create_tr2(AMX *amx, cell *params)
 		g_FreeTRs.pop();
 	}
 	memset(static_cast<void *>(tr), 0, sizeof(TraceResult));
-	return reinterpret_cast<cell>(tr);
+	return g_tr_handles.alloc(tr);
 }
 
 static cell AMX_NATIVE_CALL free_tr2(AMX *amx, cell *params)
 {
-	TraceResult *tr = reinterpret_cast<TraceResult *>(params[1]);
+	TraceResult *tr = g_tr_handles.get(params[1]);
 	if (!tr)
 	{
 		return 0;
@@ -1258,7 +1264,7 @@ static cell AMX_NATIVE_CALL create_kvd(AMX *amx, cell *params)
 
 	g_KVDWs.append(kvdw);
 
-	return reinterpret_cast<cell>(kvdw);
+	return g_kvd_handles.alloc(kvdw);
 }
 
 static cell AMX_NATIVE_CALL free_kvd(AMX *amx, cell *params) {
@@ -1266,7 +1272,7 @@ static cell AMX_NATIVE_CALL free_kvd(AMX *amx, cell *params) {
 		return 0;
 	}
 
-	KVD_Wrapper *kvdw = reinterpret_cast<KVD_Wrapper *>(params[1]);
+	KVD_Wrapper *kvdw = g_kvd_handles.get(params[1]);
 
 	for (size_t i = 0; i < g_KVDWs.length(); ++i) {
 		if (g_KVDWs[i] == kvdw) {
