@@ -41,6 +41,38 @@
 
 	#define PAGE_SIZE			4096
 	#define PAGE_ALIGN_UP(x)	((x + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1))
+
+	/*
+	 * ElfW(T) is glibc's host-bitness ELF type alias — resolves to Elf32_T
+	 * on 32-bit hosts and Elf64_T on 64-bit hosts. Wraps the rest so the
+	 * same source compiles for i386 / amd64 / aarch64.
+	 *
+	 * ELFW_ST_TYPE picks the matching ELF{32,64}_ST_TYPE macro since glibc
+	 * doesn't provide an ElfW() form for it.
+	 *
+	 * MEMUTILS_EXPECTED_EM is the e_machine value the host's game DLL must
+	 * match. EM_386 (i386), EM_X86_64 (amd64), EM_AARCH64 (aarch64).
+	 *
+	 * MEMUTILS_EXPECTED_CLASS is ELFCLASS32 on 32-bit hosts, ELFCLASS64
+	 * on 64-bit hosts.
+	 */
+	#if __SIZEOF_POINTER__ == 8
+		#define ELFW_ST_TYPE  ELF64_ST_TYPE
+		#define MEMUTILS_EXPECTED_CLASS ELFCLASS64
+	#else
+		#define ELFW_ST_TYPE  ELF32_ST_TYPE
+		#define MEMUTILS_EXPECTED_CLASS ELFCLASS32
+	#endif
+
+	#if defined(__i386__)
+		#define MEMUTILS_EXPECTED_EM EM_386
+	#elif defined(__x86_64__)
+		#define MEMUTILS_EXPECTED_EM EM_X86_64
+	#elif defined(__aarch64__)
+		#define MEMUTILS_EXPECTED_EM EM_AARCH64
+	#else
+		#error "MemoryUtils.cpp: unsupported architecture (need EM_<arch> mapping)"
+	#endif
 #endif
 
 #if defined(__APPLE__)
@@ -171,9 +203,9 @@ void *MemoryUtils::ResolveSymbol(void *handle, const char *symbol)
 	struct stat dlstat;
 	int dlfile;
 	uintptr_t map_base;
-	Elf32_Ehdr *file_hdr;
-	Elf32_Shdr *sections, *shstrtab_hdr, *symtab_hdr, *strtab_hdr;
-	Elf32_Sym *symtab;
+	ElfW(Ehdr) *file_hdr;
+	ElfW(Shdr) *sections, *shstrtab_hdr, *symtab_hdr, *strtab_hdr;
+	ElfW(Sym) *symtab;
 	const char *shstrtab, *strtab;
 	uint16_t section_count;
 	uint32_t symbol_count;
@@ -224,7 +256,7 @@ void *MemoryUtils::ResolveSymbol(void *handle, const char *symbol)
 	}
 
 	/* Map library file into memory */
-	file_hdr = (Elf32_Ehdr *)mmap(NULL, dlstat.st_size, PROT_READ, MAP_PRIVATE, dlfile, 0);
+	file_hdr = (ElfW(Ehdr) *)mmap(NULL, dlstat.st_size, PROT_READ, MAP_PRIVATE, dlfile, 0);
 	map_base = (uintptr_t)file_hdr;
 	if (file_hdr == MAP_FAILED)
 	{
@@ -239,7 +271,7 @@ void *MemoryUtils::ResolveSymbol(void *handle, const char *symbol)
 		return NULL;
 	}
 
-	sections = (Elf32_Shdr *)(map_base + file_hdr->e_shoff);
+	sections = (ElfW(Shdr) *)(map_base + file_hdr->e_shoff);
 	section_count = file_hdr->e_shnum;
 	/* Get ELF section header string table */
 	shstrtab_hdr = &sections[file_hdr->e_shstrndx];
@@ -248,7 +280,7 @@ void *MemoryUtils::ResolveSymbol(void *handle, const char *symbol)
 	/* Iterate sections while looking for ELF symbol table and string table */
 	for (uint16_t i = 0; i < section_count; i++)
 	{
-		Elf32_Shdr &hdr = sections[i];
+		ElfW(Shdr) &hdr = sections[i];
 		const char *section_name = shstrtab + hdr.sh_name;
 
 		if (strcmp(section_name, ".symtab") == 0)
@@ -268,15 +300,15 @@ void *MemoryUtils::ResolveSymbol(void *handle, const char *symbol)
 		return NULL;
 	}
 
-	symtab = (Elf32_Sym *)(map_base + symtab_hdr->sh_offset);
+	symtab = (ElfW(Sym) *)(map_base + symtab_hdr->sh_offset);
 	strtab = (const char *)(map_base + strtab_hdr->sh_offset);
 	symbol_count = symtab_hdr->sh_size / symtab_hdr->sh_entsize;
 
 	/* Iterate symbol table starting from the position we were at last time */
 	for (uint32_t i = libtable->last_pos; i < symbol_count; i++)
 	{
-		Elf32_Sym &sym = symtab[i];
-		unsigned char sym_type = ELF32_ST_TYPE(sym.st_info);
+		ElfW(Sym) &sym = symtab[i];
+		unsigned char sym_type = ELFW_ST_TYPE(sym.st_info);
 		const char *sym_name = strtab + sym.st_name;
 		Symbol *cur_sym;
 
@@ -505,8 +537,8 @@ bool MemoryUtils::GetLibraryInfo(const void *libPtr, DynLibInfo &lib)
 #elif defined(__linux__)
 
 	Dl_info info;
-	Elf32_Ehdr *file;
-	Elf32_Phdr *phdr;
+	ElfW(Ehdr) *file;
+	ElfW(Phdr) *phdr;
 	uint16_t phdrCount;
 
 	if (!dladdr(libPtr, &info))
@@ -521,7 +553,7 @@ bool MemoryUtils::GetLibraryInfo(const void *libPtr, DynLibInfo &lib)
 
 	/* This is for our insane sanity checks :o */
 	baseAddr = reinterpret_cast<uintptr_t>(info.dli_fbase);
-	file = reinterpret_cast<Elf32_Ehdr *>(baseAddr);
+	file = reinterpret_cast<ElfW(Ehdr) *>(baseAddr);
 
 	/* Check ELF magic */
 	if (memcmp(ELFMAG, file->e_ident, SELFMAG) != 0)
@@ -535,10 +567,10 @@ bool MemoryUtils::GetLibraryInfo(const void *libPtr, DynLibInfo &lib)
 		return false;
 	}
 
-	/* Check ELF architecture, which is 32-bit/x86 right now
-	 * Should change this for 64-bit if Valve gets their act together
-	 */
-	if (file->e_ident[EI_CLASS] != ELFCLASS32 || file->e_machine != EM_386 || file->e_ident[EI_DATA] != ELFDATA2LSB)
+	/* Check ELF class + machine match the host (i386 / amd64 / aarch64). */
+	if (file->e_ident[EI_CLASS] != MEMUTILS_EXPECTED_CLASS
+	    || file->e_machine != MEMUTILS_EXPECTED_EM
+	    || file->e_ident[EI_DATA] != ELFDATA2LSB)
 	{
 		return false;
 	}
@@ -550,11 +582,11 @@ bool MemoryUtils::GetLibraryInfo(const void *libPtr, DynLibInfo &lib)
 	}
 
 	phdrCount = file->e_phnum;
-	phdr = reinterpret_cast<Elf32_Phdr *>(baseAddr + file->e_phoff);
+	phdr = reinterpret_cast<ElfW(Phdr) *>(baseAddr + file->e_phoff);
 
 	for (uint16_t i = 0; i < phdrCount; i++)
 	{
-		Elf32_Phdr &hdr = phdr[i];
+		ElfW(Phdr) &hdr = phdr[i];
 
 		/* We only really care about the segment with executable code */
 		if (hdr.p_type == PT_LOAD && hdr.p_flags == (PF_X|PF_R))
