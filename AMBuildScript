@@ -102,7 +102,13 @@ class AMXXConfig(object):
     if not len(mysql_path):
       mysql_path = os.getenv('MYSQL55', '')
 
-    if len(mysql_path):
+    if mysql_path == 'system':
+      # Sentinel: build mysqlx against the distro's libmariadb-dev
+      # install (Debian / Ubuntu). modules/mysqlx/AMBuilder honors this
+      # value and resolves headers to /usr/include/mariadb plus a
+      # dynamic link against libmariadb.so.3.
+      self.mysql_path = 'system'
+    elif len(mysql_path):
       self.mysql_path = os.path.join(builder.originalCwd, mysql_path)
       if not os.path.exists(self.mysql_path):
         raise Exception('MySQL path does not exist: {0}'.format(mysql_path))

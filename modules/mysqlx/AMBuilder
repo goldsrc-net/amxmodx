@@ -4,11 +4,30 @@ import os.path
 if AMXX.mysql_path:
   binary = AMXX.MetaModule(builder, 'mysql')
 
-  binary.compiler.cxxincludes += [
-    os.path.join(AMXX.mysql_path, 'include'),
-    os.path.join(builder.currentSourcePath, 'mysql'),
-    os.path.join(builder.currentSourcePath, 'thread'),
-  ]
+  # AMXX.mysql_path == 'system' selects the distro libmariadb-dev
+  # layout: headers in /usr/include/mariadb (Debian/Ubuntu) and the
+  # runtime library libmariadb.so.3 on the linker's default search
+  # path. Dynamic link only — the deploy host needs libmariadb3
+  # installed (the standard runtime package on any MariaDB / MySQL
+  # client host).
+  #
+  # Any other AMXX.mysql_path value selects the legacy explicit-tree
+  # layout: <path>/include for headers and <path>/lib/libmysqlclient_r.a
+  # for static link.
+  use_system = AMXX.mysql_path == 'system'
+
+  if use_system:
+    binary.compiler.cxxincludes += [
+      '/usr/include/mariadb',
+      os.path.join(builder.currentSourcePath, 'mysql'),
+      os.path.join(builder.currentSourcePath, 'thread'),
+    ]
+  else:
+    binary.compiler.cxxincludes += [
+      os.path.join(AMXX.mysql_path, 'include'),
+      os.path.join(builder.currentSourcePath, 'mysql'),
+      os.path.join(builder.currentSourcePath, 'thread'),
+    ]
 
   binary.compiler.defines += [
     'SM_DEFAULT_THREADER',
@@ -19,11 +38,21 @@ if AMXX.mysql_path:
 
   if builder.target_platform == 'linux' or builder.target_platform == 'mac':
     binary.compiler.defines += ['stricmp=strcasecmp']
-    binary.compiler.linkflags += [
-      os.path.join(AMXX.mysql_path, 'lib', 'libmysqlclient_r.a'),
-      '-lpthread',
-      '-lm',
-    ]
+    if use_system:
+      # `-l:libmariadb.so.3` resolves the versioned .so directly without
+      # needing a libmariadb.so symlink. Works on every multiarch path
+      # that has libmariadb3 installed.
+      binary.compiler.linkflags += [
+        '-l:libmariadb.so.3',
+        '-lpthread',
+        '-lm',
+      ]
+    else:
+      binary.compiler.linkflags += [
+        os.path.join(AMXX.mysql_path, 'lib', 'libmysqlclient_r.a'),
+        '-lpthread',
+        '-lm',
+      ]
     if builder.target_platform == 'linux':
       binary.compiler.linkflags += [
         '-lrt'
