@@ -63,7 +63,12 @@ void OnBrowseRelocate(AMX *amx, cell *oplist, cell *cip)
 		new_opcodes[0] = op_trans_table[native];
 		new_opcodes[1] = OP_NOP;
 		codeptr -= sizeof(cell);
-#if defined __GNUC__ || defined ASM32 || defined JIT
+		// Mirror the amx_BrowseRelocate gate: oplist[X] is only populated on
+		// ASM32, JIT, or GCC labels-as-values dispatch (i.e. when sizeof(void*)
+		// fits in a cell). On 64-bit non-JIT (PAWN_CELL_SIZE=32, sizeof(void*)=8)
+		// `oplist` is uninitialized; using it writes garbage cells into the
+		// bytecode and amx_Exec later hits the default case → assert(0).
+#if defined ASM32 || defined JIT || (defined __GNUC__ && (defined(__SIZEOF_POINTER__) ? __SIZEOF_POINTER__ : 4) <= (PAWN_CELL_SIZE / 8))
 		*(cell *)codeptr = oplist[new_opcodes[0]];
 		*(cell *)(codeptr + sizeof(cell)) = oplist[new_opcodes[1]];
 #else

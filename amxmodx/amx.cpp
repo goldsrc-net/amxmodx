@@ -657,7 +657,7 @@ static int amx_BrowseRelocate(AMX *amx)
     case OP_SYSREQ_C:
 		{
 			if (hook)
-#if defined __GNUC__ || defined ASM32 || defined JIT
+#if defined ASM32 || defined JIT || (defined __GNUC__ && (defined(__SIZEOF_POINTER__) ? __SIZEOF_POINTER__ : 4) <= (PAWN_CELL_SIZE / 8))
 				hook(amx, opcode_list, &cip);
 #else
 				hook(amx, NULL, &cip);
