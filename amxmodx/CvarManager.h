@@ -18,6 +18,12 @@
 
 class CDetour;
 
+// Convert a native cvar_t* into a 32-bit cell handle for forwarding to
+// plugins (FP_CELL slot). On 64-bit hosts, casting cvar_t* directly to
+// cell would truncate the upper 32 bits and the receiving plugin would
+// see a junk handle. The handle table itself is in cvars.cpp.
+cell cvar_to_handle(cvar_t *var);
+
 enum CvarBounds
 {
 	CvarBound_Upper = 0,

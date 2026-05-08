@@ -97,7 +97,7 @@ void Cvar_DirectSet_Custom(struct cvar_s *var, const char *value, IRehldsHook_Cv
 
 			if (hook->forward->state == AutoForward::FSTATE_OK) // Our callback can be enable/disabled by natives.
 			{
-				executeForwards(hook->forward->id, reinterpret_cast<cvar_t*>(var), oldValue.chars(), var->string);
+				executeForwards(hook->forward->id, cvar_to_handle(var), oldValue.chars(), var->string);
 			}
 		}
 	}

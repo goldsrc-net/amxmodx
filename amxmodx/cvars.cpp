@@ -20,6 +20,11 @@ const char *invis_cvar_list[5] ={ "amxmodx_version", "amxmodx_modules", "amx_deb
 static PtrHandleTable<cvar_t>      g_cvar_handles;
 static PtrHandleTable<AutoForward> g_cvarhook_handles;
 
+cell cvar_to_handle(cvar_t *var)
+{
+	return var ? g_cvar_handles.find_or_alloc(var) : 0;
+}
+
 // create_cvar(const name[], const default_value[], flags = 0, const description[] = "", bool:has_min = false, Float:min_val = 0.0, bool:has_max = false, Float:max_val = 0.0)
 static cell AMX_NATIVE_CALL create_cvar(AMX *amx, cell *params)
 {
