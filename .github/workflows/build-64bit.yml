@@ -1,0 +1,250 @@
+name: Build 64bit
+# Parallel workflow for the 64bit branch. Mirrors build-release.yml's
+# packaging behaviour but adds an arch matrix (i386 + amd64 + aarch64
+# on Linux, x86 on Windows) and uses a debian:12-slim container so
+# the 64-bit toolchains and the per-arch glibc floor (~2.36) match
+# the workstation buildchain. Master-branch CI is unaffected.
+
+on:
+  push:
+    branches:
+      - 64bit
+  pull_request:
+    branches:
+      - 64bit
+  workflow_dispatch:
+
+env:
+  MYSQL_VERSION: '5.5'
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux i386 (legacy; same build path as master CI but on
+          # debian:12 rather than debian:10 to keep the toolchain in
+          # one place.)
+          - platform: linux
+            target_arch: i386
+            os: ubuntu-latest
+            os_short: linux
+            container_image: debian:12-slim
+
+          # Linux amd64 (new for this branch)
+          - platform: linux
+            target_arch: amd64
+            os: ubuntu-latest
+            os_short: linux
+            container_image: debian:12-slim
+
+          # Linux aarch64 (new for this branch — native ARM runner;
+          # falls back to qemu+cross if org disables arm64 runners.)
+          - platform: linux
+            target_arch: aarch64
+            os: ubuntu-24.04-arm
+            os_short: linux
+            container_image: debian:12-slim
+
+          # Windows x86 (legacy; matches master CI.)
+          - platform: windows
+            target_arch: i386
+            os: windows-latest
+            os_short: win
+
+    name: ${{ matrix.platform }}-${{ matrix.target_arch }}
+    runs-on: ${{ matrix.os }}
+    container:
+      image: ${{ matrix.container_image }}
+
+    steps:
+      - name: Install dependencies (Linux container)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake git rsync ca-certificates \
+            python3 python3-pip python3-venv \
+            curl wget unzip nasm \
+            g++ gcc \
+            libmariadb-dev libmariadb-dev-compat
+          # i386 / amd64 multilib on the native amd64 container.
+          if [ "${{ matrix.target_arch }}" = "i386" ]; then
+            dpkg --add-architecture i386
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              gcc-multilib g++-multilib libc6-dev-i386 \
+              libmariadb-dev:i386 libmariadb-dev-compat:i386 || true
+          fi
+          # aarch64 toolchain only needed on amd64 hosts; on the
+          # ubuntu-24.04-arm runner the native compiler is already arm64.
+
+      - name: Checkout AMX Mod X
+        uses: actions/checkout@v6
+        with:
+          path: amxmodx
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Resolve paths
+        id: path_helper
+        shell: bash
+        run: |
+          echo "dependencies=$GITHUB_WORKSPACE/dependencies" >> $GITHUB_OUTPUT
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        env:
+          cache-name: amxx-deps-64bit
+        with:
+          path: ${{ steps.path_helper.outputs.dependencies }}
+          key: ${{ runner.os }}-${{ matrix.target_arch }}-build-${{ env.cache-name }}-mysql${{ env.MYSQL_VERSION }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target_arch }}-build-${{ env.cache-name }}-
+
+      - name: Install dependencies (Linux)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          mkdir -p '${{ steps.path_helper.outputs.dependencies }}'
+          cd '${{ steps.path_helper.outputs.dependencies }}'
+
+          # Satisfy checkout-deps requirement for an "amxmodx" folder.
+          mkdir -p amxmodx
+          ../amxmodx/support/checkout-deps.sh
+
+          # Install ambuild (the container's pip is fine).
+          pip3 install --break-system-packages \
+            git+https://github.com/alliedmodders/ambuild
+
+      - name: Setup MSVC (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.target_arch == 'amd64' && 'x64' || 'x86' }}
+
+      - name: Setup NASM (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: |
+          DEPS='${{ steps.path_helper.outputs.dependencies }}'
+          mkdir -p "$DEPS"
+          cd "$DEPS"
+
+          if [ ! -d "metamod-am" ]; then
+            git clone https://github.com/alliedmodders/metamod-hl1 metamod-am
+          fi
+          if [ ! -d "hlsdk" ]; then
+            git clone https://github.com/alliedmodders/hlsdk
+          fi
+          if [ ! -d "mysql-${{ env.MYSQL_VERSION }}" ]; then
+            curl -sSL -o mysql-connector.zip \
+              "https://downloads.mysql.com/archives/get/p/19/file/mysql-connector-c-6.1.1-win32.zip"
+            7z x mysql-connector.zip
+            mv mysql-connector-c-6.1.1-win32 "mysql-${{ env.MYSQL_VERSION }}"
+            rm mysql-connector.zip
+          fi
+
+          if [ ! -d "ambuild" ]; then
+            git clone https://github.com/alliedmodders/ambuild
+          fi
+          pip install ./ambuild
+
+      - name: Build
+        working-directory: amxmodx
+        shell: bash
+        run: |
+          DEPS='${{ steps.path_helper.outputs.dependencies }}'
+          mkdir build
+          cd build
+          # The 64bit branch added --target-arch={i386,amd64,aarch64}
+          # (Phase 1) and --mysql=system to let the build pick up the
+          # distro-installed libmariadb on amd64/aarch64 where there's
+          # no prebuilt 32-bit mysql connector.
+          MYSQL_FLAG="--mysql=$DEPS/mysql-${{ env.MYSQL_VERSION }}"
+          if [ "${{ matrix.platform }}" = "linux" ] && \
+             [ "${{ matrix.target_arch }}" != "i386" ]; then
+            MYSQL_FLAG="--mysql=system"
+          fi
+          python3 ../configure.py \
+            --target-arch=${{ matrix.target_arch }} \
+            --enable-optimize \
+            --symbol-files \
+            "--metamod=$DEPS/metamod-am" \
+            "--hlsdk=$DEPS/hlsdk" \
+            "$MYSQL_FLAG"
+          ambuild
+
+      - name: Package
+        id: package
+        working-directory: amxmodx/build
+        shell: bash
+        run: |
+          version_base=$(cat ../product.version)
+          version_base=${version_base%-dev}
+          version_rev=$(git rev-list --count HEAD)
+          version="${version_base}.${version_rev}"
+          expanded_version="${version_base}-git${version_rev}"
+
+          packages=(base cstrike dod esf ns tfc ts)
+          release_dir="release"
+          mkdir -p "$release_dir"
+
+          for pkg in "${packages[@]}"; do
+            pkg_dir="packages/$pkg"
+            if [ ! -d "$pkg_dir" ]; then
+              echo "Warning: package directory $pkg_dir not found, skipping"
+              continue
+            fi
+
+            if [ "${{ matrix.platform }}" = "windows" ]; then
+              filename="amxmodx-${expanded_version}-${pkg}-${{ matrix.platform }}-${{ matrix.target_arch }}.zip"
+              (cd "$pkg_dir" && 7z a "../../${release_dir}/${filename}" addons)
+            else
+              filename="amxmodx-${expanded_version}-${pkg}-${{ matrix.platform }}-${{ matrix.target_arch }}.tar.gz"
+              tar zcf "${release_dir}/${filename}" -C "$pkg_dir" addons
+            fi
+          done
+
+          echo "version=$version" >> $GITHUB_OUTPUT
+          echo "expanded_version=$expanded_version" >> $GITHUB_OUTPUT
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: amxmodx-${{ matrix.platform }}-${{ matrix.target_arch }}
+          path: amxmodx/build/release/*
+
+      # Only push to a release on direct 64bit branch pushes,
+      # not PR runs (PRs from forks don't have GITHUB_TOKEN write).
+      - name: Create Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/64bit'
+        uses: ncipollo/release-action@v1.21.0
+        with:
+          allowUpdates: true
+          replacesArtifacts: false
+          omitBodyDuringUpdate: true
+          omitDraftDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          omitBody: true
+
+          artifacts: amxmodx/build/release/*
+          artifactContentType: ${{ matrix.platform == 'windows' && 'application/zip' || 'application/gzip' }}
+          artifactErrorsFailBuild: false
+
+          tag: 64bit-${{ steps.package.outputs.version }}
+          commit: ${{ github.sha }}
+          generateReleaseNotes: true
+
+          draft: false
+          prerelease: true
+          token: ${{ secrets.GITHUB_TOKEN }}
