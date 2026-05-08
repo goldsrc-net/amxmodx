@@ -765,6 +765,14 @@ cell executeForwards(int id, ...)
 			cell *tmp = reinterpret_cast<cell *>(va_arg(argptr, cell*));
 			params[i] = reinterpret_cast<intptr_t>(tmp);
 		}
+		else if (param_type == FP_STRING || param_type == FP_STRINGEX)
+		{
+			// Pointer-typed variadic arg: must be read at native pointer
+			// width, not truncated to 32-bit cell. CForward::execute
+			// strlens this directly.
+			const char *tmp = va_arg(argptr, const char *);
+			params[i] = reinterpret_cast<intptr_t>(tmp);
+		}
 		else
 			params[i] = (intptr_t)va_arg(argptr, cell);
 	}
