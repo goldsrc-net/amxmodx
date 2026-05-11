@@ -3,18 +3,15 @@ import os.path
 
 binary = AMXX.MetaModule(builder, 'regex')
 
-# PCRE is now built per-arch from tools/pcre/ so the 32-bit-only
-# prebuilt lib_<plat>/libpcre.a archives are no longer used. On
-# Windows AMBuild path, fall back to the prebuilt for now (msvc12
-# project files retain it independently); Phase 2.4's per-arch
-# build is Linux/Mac focused.
-if builder.target_platform == 'windows':
-  binary.compiler.postlink += [binary.Dep('lib_win\\pcre.lib')]
-else:
-  binary.compiler.linkflags += [AMXX.pcre.binary]
-  binary.compiler.includes += [
-    os.path.join(builder.sourcePath, 'tools', 'pcre'),
-  ]
+# PCRE is built per-arch from tools/pcre/ — the prebuilt
+# lib_<plat>/libpcre.a / lib_win/pcre.lib archives are x86-only and
+# can't link into 64-bit shared libs. The msvc12 project files retain
+# the prebuilt independently; this AMBuild path uses from-source for
+# every arch (Linux i386/amd64/aarch64 + Windows Win32/x64).
+binary.compiler.linkflags += [AMXX.pcre.binary]
+binary.compiler.includes += [
+  os.path.join(builder.sourcePath, 'tools', 'pcre'),
+]
 
 binary.compiler.defines += [
   'PCRE_STATIC',
