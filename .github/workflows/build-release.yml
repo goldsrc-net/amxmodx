@@ -91,7 +91,12 @@ jobs:
             git clone https://github.com/alliedmodders/metamod-hl1 metamod-am
           fi
           if [ ! -d "hlsdk" ]; then
-            git clone https://github.com/alliedmodders/hlsdk
+            # 64bit branch of the goldsrc-net hlsdk fork — carries
+            # the min/max → minm/maxm rename. Without it, amxmodx
+            # fails to compile because extdll.h's macros collide
+            # with C++ stdlib template chains (algorithm, cmath,
+            # string, ...).
+            git clone -b 64bit https://github.com/goldsrc-net/hlsdk
           fi
           if [ ! -d "mysql-${{ env.MYSQL_VERSION }}" ]; then
             curl -sSL -o mysql-connector.zip \

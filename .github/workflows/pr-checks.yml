@@ -65,7 +65,11 @@ jobs:
           chdir %DEPENDENCIES_ROOT_WIN%
           git clone https://github.com/alliedmodders/ambuild
           git clone https://github.com/alliedmodders/metamod-hl1 metamod-am
-          git clone https://github.com/alliedmodders/hlsdk
+          REM 64bit branch of the goldsrc-net hlsdk fork — carries the
+          REM min/max → minm/maxm rename. Without it, amxmodx fails
+          REM to compile because extdll.h's macros collide with C++
+          REM stdlib template chains (algorithm, cmath, string, ...).
+          git clone -b 64bit https://github.com/goldsrc-net/hlsdk
 
           curl -L -o "mysql-connector-c-6.1.1-win32.zip" https://downloads.mysql.com/archives/get/p/19/file/mysql-connector-c-6.1.1-win32.zip
           7z x mysql-connector-c-6.1.1-win32.zip -o"mysql"
