@@ -3,6 +3,14 @@
 #include <Windows.h>
 #include <stdlib.h>
 
+// Whole file is x86-only: it uses inline __asm to capture Eip/Ebp/Esp
+// from CONTEXT (MSVC's x64 cl.exe doesn't support inline asm at all, and
+// the x64 CONTEXT layout uses Rip/Rbp/Rsp anyway), and the underlying
+// MySQL-1900-CRT-compat hack only applies to the win32 mysql connector.
+// The winx64 connector ships a current-CRT build and doesn't need this
+// shim, so on x64 the file compiles to an empty object.
+#ifdef _M_IX86
+
 // Fix from from https://stackoverflow.com/a/34655235.
 //
 // __iob_func required by the MySQL we use,
@@ -168,3 +176,5 @@ void _dosmaperr(DWORD oserrno)
 	else
 		errno = EINVAL;
 }
+
+#endif // _M_IX86

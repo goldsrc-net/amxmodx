@@ -14,9 +14,17 @@ binary.compiler.cxxincludes += [
 ]
 
 # AsmJit needs C++17. Drop project-wide -std= and set 17 just for this binary.
+# MSVC and GCC spell the flag differently; pick the right form so cl.exe
+# doesn't silently fall back to C++14 (which downgrades `const` at namespace
+# scope to internal linkage and breaks hook_signatures.cpp ↔ hook_native.cpp).
 binary.compiler.cxxflags = [
-  f for f in binary.compiler.cxxflags if not f.startswith('-std=')
-] + ['-std=c++17']
+  f for f in binary.compiler.cxxflags
+  if not f.startswith('-std=') and not f.startswith('/std:')
+]
+if builder.compiler.like('msvc'):
+  binary.compiler.cxxflags += ['/std:c++17']
+else:
+  binary.compiler.cxxflags += ['-std=c++17']
 
 binary.compiler.linkflags += [AMXX.asmjit.binary]
 
@@ -39,9 +47,16 @@ binary.sources = [
 
 if builder.target_platform == 'windows':
     binary.sources += ['version.rc']
-    binary.compiler.linkflags += [
-      '/EXPORT:GiveFnptrsToDll=_GiveFnptrsToDll@8,@1',
-      '/SECTION:.data,RW',
-    ]
+    binary.compiler.linkflags += ['/SECTION:.data,RW']
+    if AMXX.target_arch == 'i386':
+      # x86 stdcall name decoration — alias the clean symbol to the
+      # decorated one. On x64 there's no decoration; nothing to alias.
+      binary.compiler.linkflags += [
+        '/EXPORT:GiveFnptrsToDll=_GiveFnptrsToDll@8,@1',
+      ]
+    else:
+      binary.compiler.linkflags += [
+        '/EXPORT:GiveFnptrsToDll,@1',
+      ]
 
 AMXX.modules += [builder.Add(binary)]

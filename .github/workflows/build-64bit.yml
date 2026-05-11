@@ -116,16 +116,19 @@ jobs:
         if: matrix.platform == 'linux'
         shell: bash
         run: |
+          # Install ambuild FIRST so checkout-deps.sh's `import ambuild2`
+          # check passes and it skips its `get-pip.py` bootstrap path
+          # (which fails under PEP 668 on debian:12's externally-managed
+          # python).
+          pip3 install --break-system-packages \
+            git+https://github.com/alliedmodders/ambuild
+
           mkdir -p '${{ steps.path_helper.outputs.dependencies }}'
           cd '${{ steps.path_helper.outputs.dependencies }}'
 
           # Satisfy checkout-deps requirement for an "amxmodx" folder.
           mkdir -p amxmodx
           ../amxmodx/support/checkout-deps.sh
-
-          # Install ambuild (the container's pip is fine).
-          pip3 install --break-system-packages \
-            git+https://github.com/alliedmodders/ambuild
 
       - name: Setup MSVC (Windows)
         if: matrix.platform == 'windows'

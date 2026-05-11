@@ -61,9 +61,12 @@ if AMXX.mysql_path:
     binary.compiler.linkflags += [
       os.path.join(AMXX.mysql_path, 'lib', 'mysqlclient.lib'),
       'ws2_32.lib',
-      '/EXPORT:GiveFnptrsToDll=_GiveFnptrsToDll@8,@1',
       '/SECTION:.data,RW'
     ]
+    if AMXX.target_arch == 'i386':
+      binary.compiler.linkflags += ['/EXPORT:GiveFnptrsToDll=_GiveFnptrsToDll@8,@1']
+    else:
+      binary.compiler.linkflags += ['/EXPORT:GiveFnptrsToDll,@1']
     if binary.compiler.vendor == 'msvc' and binary.compiler.version >= 1900:
        binary.sources += [
         '../../public/msvc/msvc15hack.c'
