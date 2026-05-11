@@ -20,10 +20,16 @@ lib.compiler.includes += [
 ]
 
 # AsmJit needs C++17 minimum. Drop the project-wide C++11 std flag and
-# replace with C++17 just for this lib.
+# replace with C++17 just for this lib. MSVC and GCC spell the flag
+# differently; pick the right form for the active toolchain.
 lib.compiler.cxxflags = [
-  f for f in lib.compiler.cxxflags if not f.startswith('-std=')
-] + ['-std=c++17']
+  f for f in lib.compiler.cxxflags
+  if not f.startswith('-std=') and not f.startswith('/std:')
+]
+if builder.compiler.like('msvc'):
+  lib.compiler.cxxflags += ['/std:c++17']
+else:
+  lib.compiler.cxxflags += ['-std=c++17']
 
 # AsmJit is third-party; don't make its warnings build-fatal.
 lib.compiler.cflags = [
