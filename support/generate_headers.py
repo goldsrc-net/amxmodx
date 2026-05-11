@@ -23,14 +23,14 @@ class FolderChanger:
   def __exit__(self, type, value, traceback):
     os.chdir(self.old)
 
-def run_and_return(argv):
+def run_and_return(argv, env=None):
   # Python 2.6 doesn't have check_output.
   if hasattr(subprocess, 'check_output'):
-    text = subprocess.check_output(argv)
+    text = subprocess.check_output(argv, env=env)
     if str != bytes:
       text = str(text, 'utf-8')
   else:
-    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     output, ignored = p.communicate()
     rval = p.poll()
     if rval:
@@ -38,12 +38,36 @@ def run_and_return(argv):
     text = output.decode('utf8')
   return text.strip()
 
-def get_git_version():
-  revision_count = run_and_return(['git', 'rev-list', '--count', 'HEAD'])
-  revision_hash = run_and_return(['git', 'log', '--pretty=format:%h:%H', '-n', '1'])
-  shorthash, longhash = revision_hash.split(':')
+def resolve_gitdir(source):
+  # Mirror of support/Versioning's resolver: handle the submodule
+  # gitlink case where .git is a FILE pointing at the real gitdir.
+  git = os.path.join(source, '.git')
+  if os.path.isdir(git):
+    return git
+  if os.path.isfile(git):
+    with open(git) as fp:
+      line = fp.read().strip()
+    if line.startswith('gitdir: '):
+      rel = line[len('gitdir: '):]
+      return rel if os.path.isabs(rel) else os.path.normpath(os.path.join(source, rel))
+  return git
 
-  return revision_count, shorthash, longhash
+def get_git_version():
+  # Best-effort. If anything fails (no git, gitdir unreachable in this
+  # container, submodule layout with a now-unrelated core.worktree,
+  # source unpacked from a tarball, ...) just return a placeholder.
+  # The built binary is still correct; only the version string in
+  # AMXX_BUILD_CSET / AMXX_VERSION_LOCAL_REV is unknown.
+  env = os.environ.copy()
+  env['GIT_DIR'] = resolve_gitdir(SourceFolder)
+  env['GIT_WORK_TREE'] = SourceFolder
+  try:
+    revision_count = run_and_return(['git', 'rev-list', '--count', 'HEAD'], env=env)
+    revision_hash  = run_and_return(['git', 'log', '--pretty=format:%h:%H', '-n', '1'], env=env)
+    shorthash, longhash = revision_hash.split(':')
+    return revision_count, shorthash, longhash
+  except (subprocess.CalledProcessError, OSError, FileNotFoundError, ValueError):
+    return '0', '0000000', '0' * 40
 
 def output_version_headers():
   with FolderChanger(SourceFolder):

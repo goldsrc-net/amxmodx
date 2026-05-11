@@ -1,10 +1,29 @@
-# vim: set ts=8 sts=2 sw=2 tw=99 et ft=python: 
+# vim: set ts=8 sts=2 sw=2 tw=99 et ft=python:
 import os, sys
 import re
 
 builder.SetBuildFolder('/')
 
 includes = builder.AddFolder('includes')
+
+# Resolve sourcePath/.git to its actual gitdir. In a submodule
+# checkout .git is a "gitlink" FILE containing "gitdir: <path>"
+# pointing at the parent's .git/modules/<name>, not a directory.
+# Python's open() doesn't follow gitlinks, so probe HEAD via the
+# resolved gitdir instead.
+def resolve_gitdir(source):
+  git = os.path.join(source, '.git')
+  if os.path.isdir(git):
+    return git
+  if os.path.isfile(git):
+    with open(git) as fp:
+      line = fp.read().strip()
+    if line.startswith('gitdir: '):
+      rel = line[len('gitdir: '):]
+      return rel if os.path.isabs(rel) else os.path.normpath(os.path.join(source, rel))
+  return git  # let downstream code error normally if neither
+
+GITDIR = resolve_gitdir(builder.sourcePath)
 
 argv = [
   sys.executable,
@@ -17,25 +36,35 @@ outputs = [
   os.path.join(builder.buildFolder, 'includes', 'amxmodx_version.inc'),
 ]
 
-with open(os.path.join(builder.sourcePath, '.git', 'HEAD')) as fp:
-  head_contents = fp.read().strip()
-  if re.search('^[a-fA-F0-9]{40}$', head_contents):
-    git_head_path = os.path.join(builder.sourcePath, '.git', 'HEAD')
-  else:
-    git_state = head_contents.split(':')[1].strip()
-    git_head_path = os.path.join(builder.sourcePath, '.git', git_state)
-    if not os.path.exists(git_head_path):
-      git_head_path = os.path.join(builder.sourcePath, '.git', 'HEAD')
+# Probe HEAD to determine the rebuild trigger for the generated
+# version headers. Fail-open: if .git isn't present or readable
+# (build inside a chroot, tarball, submodule whose gitdir wasn't
+# mounted, etc.) just trigger on product.version instead. The
+# resulting binary will have a placeholder commit count + sha;
+# that's fine for in-tree dev builds.
+git_head_path = None
+head_path = os.path.join(GITDIR, 'HEAD')
+if os.path.isfile(head_path):
+  try:
+    with open(head_path) as fp:
+      head_contents = fp.read().strip()
+    if re.search('^[a-fA-F0-9]{40}$', head_contents):
+      git_head_path = head_path
+    elif ':' in head_contents:
+      git_state = head_contents.split(':')[1].strip()
+      candidate = os.path.join(GITDIR, git_state)
+      git_head_path = candidate if os.path.exists(candidate) else head_path
+  except (IOError, OSError):
+    pass
 
 sources = [
   os.path.join(builder.sourcePath, 'product.version'),
-
-  # This is a hack, but we need some way to only run this script when Git changes.
-  git_head_path,
-
   # The script source is a dependency, of course...
   argv[1]
 ]
+# Trigger a rebuild when Git changes, if .git/HEAD is reachable.
+if git_head_path is not None:
+  sources.append(git_head_path)
 cmd_node, output_nodes = builder.AddCommand(
   inputs = sources,
   argv = argv,
