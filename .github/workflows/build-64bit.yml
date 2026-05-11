@@ -126,6 +126,17 @@ jobs:
           mkdir -p '${{ steps.path_helper.outputs.dependencies }}'
           cd '${{ steps.path_helper.outputs.dependencies }}'
 
+          # Pre-clone hlsdk from the goldsrc-net/hlsdk @ 64bit fork before
+          # running checkout-deps.sh. Upstream alliedmodders/hlsdk has
+          # extdll.h's `#define max(a,b) ...` which collides with the
+          # C++17 stdlib (cmath → tr1/ell_integral pulls std::max) and
+          # breaks the build. The 64bit fork renames these to minm/maxm.
+          # checkout-deps.sh's checkout function is a no-op when the
+          # target dir already exists, so this pre-clone wins.
+          if [ ! -d hlsdk ]; then
+            git clone --depth=1 -b 64bit https://github.com/goldsrc-net/hlsdk
+          fi
+
           # Satisfy checkout-deps requirement for an "amxmodx" folder.
           mkdir -p amxmodx
           ../amxmodx/support/checkout-deps.sh

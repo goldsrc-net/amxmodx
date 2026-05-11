@@ -16,6 +16,12 @@
 // FuncSignatures for incoming and outgoing calls.
 
 #include "HookSignature.h"
+// hook_callbacks.h forward-declares every Sig_* with `extern const`. Pulling
+// it in here makes the definitions below inherit external linkage from the
+// prior `extern` — without it, the C++ standard gives namespace-scope `const`
+// internal linkage, leaving hook_native.cpp's references unresolved at link
+// time on MSVC.
+#include "hook_callbacks.h"
 
 namespace HS = HamSig;
 
