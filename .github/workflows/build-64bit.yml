@@ -1,9 +1,11 @@
 name: Build 64bit
 # Parallel workflow for the 64bit branch. Mirrors build-release.yml's
 # packaging behaviour but adds an arch matrix (i386 + amd64 + aarch64
-# on Linux, x86 on Windows) and uses a debian:12-slim container so
-# the 64-bit toolchains and the per-arch glibc floor (~2.36) match
-# the workstation buildchain. Master-branch CI is unaffected.
+# on Linux, x86 on Windows). Uses the goldsrc-net/build-containers
+# debian10 image — same base (debian:buster + clang-11) as upstream
+# amxmodx's release CI, just with cross-toolchain + multilib additions
+# baked in. glibc floor for produced binaries is 2.28 (debian:buster).
+# Master-branch CI is unaffected.
 
 on:
   push:
@@ -25,29 +27,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux i386 (legacy; same build path as master CI but on
-          # debian:12 rather than debian:10 to keep the toolchain in
-          # one place.)
+          # Linux i386 (legacy; same image as master CI — upstream's
+          # debian10 base, just with our additions superset.)
           - platform: linux
             target_arch: i386
             os: ubuntu-latest
             os_short: linux
-            container_image: debian:12-slim
+            container_image: ghcr.io/goldsrc-net/build-containers/debian10:latest
 
           # Linux amd64 (new for this branch)
           - platform: linux
             target_arch: amd64
             os: ubuntu-latest
             os_short: linux
-            container_image: debian:12-slim
+            container_image: ghcr.io/goldsrc-net/build-containers/debian10:latest
 
-          # Linux aarch64 (new for this branch — native ARM runner;
-          # falls back to qemu+cross if org disables arm64 runners.)
+          # Linux aarch64 — runs on the native arm64 runner so AMBuild's
+          # compile-and-run probe works without qemu/binfmt. The
+          # build-containers/debian10 image publishes both linux/amd64
+          # and linux/arm64 manifests; this row pulls the arm64 one.
           - platform: linux
             target_arch: aarch64
             os: ubuntu-24.04-arm
             os_short: linux
-            container_image: debian:12-slim
+            container_image: ghcr.io/goldsrc-net/build-containers/debian10:latest
 
           # Windows x86 (legacy; matches master CI.)
           - platform: windows
@@ -67,27 +70,10 @@ jobs:
       image: ${{ matrix.container_image }}
 
     steps:
-      - name: Install dependencies (Linux container)
-        if: matrix.platform == 'linux'
-        shell: bash
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            build-essential cmake git rsync ca-certificates \
-            python3 python3-pip python3-venv \
-            curl wget unzip nasm \
-            g++ gcc \
-            libmariadb-dev libmariadb-dev-compat
-          # i386 / amd64 multilib on the native amd64 container.
-          if [ "${{ matrix.target_arch }}" = "i386" ]; then
-            dpkg --add-architecture i386
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              gcc-multilib g++-multilib libc6-dev-i386 \
-              libmariadb-dev:i386 libmariadb-dev-compat:i386 || true
-          fi
-          # aarch64 toolchain only needed on amd64 hosts; on the
-          # ubuntu-24.04-arm runner the native compiler is already arm64.
+      # build-containers/debian10 bakes in: clang-11, gcc-multilib +
+      # libc6-dev-i386, gcc-aarch64-linux-gnu cross + arm64 multiarch
+      # runtime, cmake (Kitware 3.29.6), rsync, nasm, libmariadb-dev,
+      # ambuild. No per-job apt install needed for the standard set.
 
       - name: Checkout AMX Mod X
         uses: actions/checkout@v6
@@ -116,13 +102,6 @@ jobs:
         if: matrix.platform == 'linux'
         shell: bash
         run: |
-          # Install ambuild FIRST so checkout-deps.sh's `import ambuild2`
-          # check passes and it skips its `get-pip.py` bootstrap path
-          # (which fails under PEP 668 on debian:12's externally-managed
-          # python).
-          pip3 install --break-system-packages \
-            git+https://github.com/alliedmodders/ambuild
-
           mkdir -p '${{ steps.path_helper.outputs.dependencies }}'
           cd '${{ steps.path_helper.outputs.dependencies }}'
 
