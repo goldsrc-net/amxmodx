@@ -34,10 +34,13 @@ if builder.target_platform == 'mac':
     '-Wl,-read_only_relocs,suppress'
   ]
 elif builder.target_platform == 'windows':
-  binary.compiler.linkflags += [
-    '/EXPORT:GiveFnptrsToDll=_GiveFnptrsToDll@8,@1',
-    '/SECTION:.data,RW',
-  ]
+  binary.compiler.linkflags += ['/SECTION:.data,RW']
+  if AMXX.target_arch == 'i386':
+    # Stdcall name decoration — alias the clean symbol to the
+    # decorated one. x64 has no decoration; nothing to alias.
+    binary.compiler.linkflags += ['/EXPORT:GiveFnptrsToDll=_GiveFnptrsToDll@8,@1']
+  else:
+    binary.compiler.linkflags += ['/EXPORT:GiveFnptrsToDll,@1']
 elif builder.target_platform == 'linux':
   binary.compiler.postlink += [
     binary.Dep(AMXX.stdcxx_path),
