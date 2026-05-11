@@ -17,7 +17,14 @@ on:
   workflow_dispatch:
 
 env:
-  MYSQL_VERSION: '5.5'
+  # MariaDB Connector/C version. Picked to match debian:buster's
+  # libmariadb-dev (1:10.3.39-0+deb10u2 embeds Connector/C 3.1.21
+  # via the bundled mariadb-10.3 source). Same minor for both Linux
+  # (statically linked from /opt/mariadb-static-<arch>/ baked into the
+  # buildchain image) and Windows (extracted from the official MSI in
+  # this workflow). Uniform wire-protocol coverage across all 5
+  # build-matrix rows.
+  MARIADB_CC_VERSION: '3.1.21'
 
 jobs:
   build:
@@ -94,7 +101,7 @@ jobs:
           cache-name: amxx-deps-64bit
         with:
           path: ${{ steps.path_helper.outputs.dependencies }}
-          key: ${{ runner.os }}-${{ matrix.target_arch }}-build-${{ env.cache-name }}-mysql${{ env.MYSQL_VERSION }}
+          key: ${{ runner.os }}-${{ matrix.target_arch }}-build-${{ env.cache-name }}-mariadb${{ env.MARIADB_CC_VERSION }}
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target_arch }}-build-${{ env.cache-name }}-
 
@@ -148,19 +155,45 @@ jobs:
             # collide with extdll.h's function-like macros.
             git clone -b 64bit https://github.com/goldsrc-net/hlsdk
           fi
-          if [ ! -d "mysql-${{ env.MYSQL_VERSION }}" ]; then
-            # mysql-connector-c 6.1.1 was shipped as both -win32 and
-            # -winx64 (matched archive ids on the MySQL archives CDN).
+          if [ ! -d "mariadb-connector-c" ]; then
+            # MariaDB Connector/C — matches the Linux base image's
+            # libmariadb-dev (debian:buster ships Connector/C 3.1.21
+            # internally via mariadb-10.3). dlm.mariadb.com paths are
+            # stable per-file tokens that 302-redirect to a fresh
+            # signed GCS URL on every fetch; URL works in CI today
+            # and indefinitely without regeneration.
             if [ "${{ matrix.target_arch }}" = "amd64" ]; then
-              MYSQL_ZIP="mysql-connector-c-6.1.1-winx64.zip"
+              MSI_URL="https://dlm.mariadb.com/3216035/Connectors/c/connector-c-${{ env.MARIADB_CC_VERSION }}/mariadb-connector-c-${{ env.MARIADB_CC_VERSION }}-win64.msi"
             else
-              MYSQL_ZIP="mysql-connector-c-6.1.1-win32.zip"
+              MSI_URL="https://dlm.mariadb.com/3216039/Connectors/c/connector-c-${{ env.MARIADB_CC_VERSION }}/mariadb-connector-c-${{ env.MARIADB_CC_VERSION }}-win32.msi"
             fi
-            curl -sSL -o mysql-connector.zip \
-              "https://downloads.mysql.com/archives/get/p/19/file/${MYSQL_ZIP}"
-            7z x mysql-connector.zip
-            mv "${MYSQL_ZIP%.zip}" "mysql-${{ env.MYSQL_VERSION }}"
-            rm mysql-connector.zip
+            curl -sSL -o mariadb-cc.msi "$MSI_URL"
+            # Admin install (/a) extracts files with their proper
+            # names (mariadbclient.lib etc.) — the raw CAB inside the
+            # MSI stores them under WiX file IDs like 'libstatic',
+            # which 7z would extract unnamed. /qn = no UI. //a / //qn
+            # are Git-Bash escapes for the Windows tool's /a /qn args.
+            mkdir -p mariadb-extracted
+            msiexec.exe //a "$(cygpath -w "$PWD/mariadb-cc.msi")" //qn TARGETDIR="$(cygpath -w "$PWD/mariadb-extracted")"
+            # MSI layout differs by arch:
+            #   win32: <TARGETDIR>/Program Files/MariaDB/MariaDB Connector C/
+            #   win64: <TARGETDIR>/MariaDB/MariaDB Connector C 64-bit/
+            # Different top-level + " 64-bit" suffix on the SDK dir
+            # name for win64. Locate via glob so both shapes match.
+            sdk_root=$(find mariadb-extracted -type d -name 'MariaDB Connector C*' | head -1)
+            if [ -z "$sdk_root" ]; then
+              echo "::error::failed to locate MariaDB Connector C SDK dir under mariadb-extracted/"
+              find mariadb-extracted -maxdepth 6 -type d
+              exit 1
+            fi
+            mv "$sdk_root" mariadb-connector-c
+            # amxmodx's mysqlx/AMBuilder hardcodes lib/mysqlclient.lib
+            # for Windows (Oracle's filename convention). MariaDB's
+            # MSI ships mariadbclient.lib (static) and libmariadb.lib
+            # (import for the DLL). Rename the static one so the
+            # existing AMBuilder line resolves without change.
+            mv mariadb-connector-c/lib/mariadbclient.lib mariadb-connector-c/lib/mysqlclient.lib
+            rm -rf mariadb-extracted mariadb-cc.msi
           fi
 
           if [ ! -d "ambuild" ]; then
@@ -175,14 +208,17 @@ jobs:
           DEPS='${{ steps.path_helper.outputs.dependencies }}'
           mkdir build
           cd build
-          # The 64bit branch added --target-arch={i386,amd64,aarch64}
-          # (Phase 1) and --mysql=system to let the build pick up the
-          # distro-installed libmariadb on amd64/aarch64 where there's
-          # no prebuilt 32-bit mysql connector.
-          MYSQL_FLAG="--mysql=$DEPS/mysql-${{ env.MYSQL_VERSION }}"
-          if [ "${{ matrix.platform }}" = "linux" ] && \
-             [ "${{ matrix.target_arch }}" != "i386" ]; then
-            MYSQL_FLAG="--mysql=system"
+          # Linux: per-arch static-link staging tree baked into the
+          # buildchain image at /opt/mariadb-static-<arch>/{include,lib}.
+          # Produces a mysql_amxx_<arch>.so with no libmariadb.so.3 in
+          # NEEDED — no apt install libmariadb3 required on deploy hosts.
+          #
+          # Windows: SDK extracted from the official MSI in the install
+          # step above. Same Connector/C version as Linux.
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            MYSQL_FLAG="--mysql=/opt/mariadb-static-${{ matrix.target_arch }}"
+          else
+            MYSQL_FLAG="--mysql=$DEPS/mariadb-connector-c"
           fi
           python3 ../configure.py \
             --target-arch=${{ matrix.target_arch }} \

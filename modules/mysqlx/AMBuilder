@@ -61,6 +61,14 @@ if AMXX.mysql_path:
     binary.compiler.linkflags += [
       os.path.join(AMXX.mysql_path, 'lib', 'mysqlclient.lib'),
       'ws2_32.lib',
+      # MariaDB Connector/C 3.1.x links Windows Schannel for TLS, which
+      # the static mariadbclient.lib pulls in via schannel_certs.obj +
+      # ma_tls_schannel.obj. The system libs below resolve those refs;
+      # they're always-present Windows DLLs, harmless if not actually
+      # needed (e.g. when the connector used to be Oracle's 6.1.1 here).
+      'crypt32.lib',    # Cert*/Crypt* — certificate APIs
+      'secur32.lib',    # SSPI / Schannel — FreeCredentialsHandle etc.
+      'shlwapi.lib',    # PathRemoveFileSpecA
       '/SECTION:.data,RW'
     ]
     if AMXX.target_arch == 'i386':
