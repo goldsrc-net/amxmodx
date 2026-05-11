@@ -55,6 +55,12 @@ jobs:
             os: windows-latest
             os_short: win
 
+          # Windows amd64 (new for this branch — feeds ReHLDS Win64).
+          - platform: windows
+            target_arch: amd64
+            os: windows-latest
+            os_short: win
+
     name: ${{ matrix.platform }}-${{ matrix.target_arch }}
     runs-on: ${{ matrix.os }}
     container:
@@ -150,10 +156,17 @@ jobs:
             git clone -b 64bit https://github.com/goldsrc-net/hlsdk
           fi
           if [ ! -d "mysql-${{ env.MYSQL_VERSION }}" ]; then
+            # mysql-connector-c 6.1.1 was shipped as both -win32 and
+            # -winx64 (matched archive ids on the MySQL archives CDN).
+            if [ "${{ matrix.target_arch }}" = "amd64" ]; then
+              MYSQL_ZIP="mysql-connector-c-6.1.1-winx64.zip"
+            else
+              MYSQL_ZIP="mysql-connector-c-6.1.1-win32.zip"
+            fi
             curl -sSL -o mysql-connector.zip \
-              "https://downloads.mysql.com/archives/get/p/19/file/mysql-connector-c-6.1.1-win32.zip"
+              "https://downloads.mysql.com/archives/get/p/19/file/${MYSQL_ZIP}"
             7z x mysql-connector.zip
-            mv mysql-connector-c-6.1.1-win32 "mysql-${{ env.MYSQL_VERSION }}"
+            mv "${MYSQL_ZIP%.zip}" "mysql-${{ env.MYSQL_VERSION }}"
             rm mysql-connector.zip
           fi
 
