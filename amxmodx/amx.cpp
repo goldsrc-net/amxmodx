@@ -571,7 +571,7 @@ static int amx_BrowseRelocate(AMX *amx)
      */
     if (sizeof(AMX_NATIVE)<=sizeof(cell))
       amx->sysreq_d=OP_SYSREQ_D;
-	amx->userdata[UD_OPCODELIST] = (long)NULL;
+	amx->userdata[UD_OPCODELIST] = NULL;
   #endif
 
   /* start browsing code */
