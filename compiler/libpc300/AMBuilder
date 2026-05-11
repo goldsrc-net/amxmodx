@@ -8,18 +8,17 @@ binary.compiler.includes += [
   os.path.join(builder.buildPath, builder.buildFolder),
 ]
 
-# Vendored PAWN compiler. scstate.c:state_addlist reads through a
-# realloc'd pointer that gcc-12+ flags as use-after-free under strict
-# static analysis; the read is actually of the new allocation but
-# gcc can't see that. Drop the error escalation just for this
-# subbuild rather than rewrite upstream code.
+# Vendored PAWN compiler — upstream code we don't intend to patch.
+# Drop -Werror entirely for this subbuild so the build doesn't break
+# on whichever new analysis the next gcc surfaces (gcc-12 added
+# -Wuse-after-free for scstate.c:state_addlist, gcc-13 added more,
+# etc.). gcc-11 doesn't even recognise -Wno-error=use-after-free so
+# the narrow per-warning escape hatch wouldn't work across versions.
+# Same approach support/asmjit/AMBuilder uses for the vendored
+# AsmJit submodule.
 if builder.compiler.like('gcc'):
-  binary.compiler.cflags = [
-    f for f in binary.compiler.cflags if f != '-Werror=use-after-free'
-  ] + ['-Wno-error=use-after-free']
-  binary.compiler.cxxflags = [
-    f for f in binary.compiler.cxxflags if f != '-Werror=use-after-free'
-  ] + ['-Wno-error=use-after-free']
+  binary.compiler.cflags   = [f for f in binary.compiler.cflags   if f != '-Werror']
+  binary.compiler.cxxflags = [f for f in binary.compiler.cxxflags if f != '-Werror']
 
 if builder.target_platform in ['mac', 'linux']:
   binary.compiler.defines += ['ENABLE_BINRELOC']

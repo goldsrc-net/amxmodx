@@ -13,15 +13,13 @@ binary.compiler.defines += [
 ]
 
 if binary.compiler.cxx.name == 'gcc':
-  binary.compiler.cflags += [
-    '-Wno-misleading-indentation',
-    # gcc-12+ flags sqlite3.c:sqlite3SelectNew() as
-    # -Werror=return-local-addr (false positive — the address it returns
-    # is to a heap-copy made by sqlite3DbMallocRawNN, not to the local
-    # `standin` variable visible in the source). Suppress; the file is
-    # upstream-vendored.
-    '-Wno-error=return-local-addr',
-  ]
+  binary.compiler.cflags += ['-Wno-misleading-indentation']
+  # Vendored amalgamated sqlite3.c — upstream code we don't intend to
+  # patch. gcc-12+ adds analyses like -Werror=return-local-addr that
+  # fire on sqlite3SelectNew()'s heap-copy idiom (false positive).
+  # Drop -Werror for this subbuild so warnings don't escalate, across
+  # whichever gcc version is in the build image.
+  binary.compiler.cflags = [f for f in binary.compiler.cflags if f != '-Werror']
 
 if builder.target_platform == 'linux' or builder.target_platform == 'mac':
   binary.compiler.defines += ['stricmp=strcasecmp']
