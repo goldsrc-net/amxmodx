@@ -13,7 +13,15 @@ binary.compiler.defines += [
 ]
 
 if binary.compiler.cxx.name == 'gcc':
-  binary.compiler.cflags += ['-Wno-misleading-indentation']
+  binary.compiler.cflags += [
+    '-Wno-misleading-indentation',
+    # gcc-12+ flags sqlite3.c:sqlite3SelectNew() as
+    # -Werror=return-local-addr (false positive — the address it returns
+    # is to a heap-copy made by sqlite3DbMallocRawNN, not to the local
+    # `standin` variable visible in the source). Suppress; the file is
+    # upstream-vendored.
+    '-Wno-error=return-local-addr',
+  ]
 
 if builder.target_platform == 'linux' or builder.target_platform == 'mac':
   binary.compiler.defines += ['stricmp=strcasecmp']
