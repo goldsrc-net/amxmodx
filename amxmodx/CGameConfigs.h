@@ -105,6 +105,8 @@ class CGameConfig
 		bool                       m_MatchedGame;
 		bool                       m_HadEngine;
 		bool                       m_MatchedEngine;
+		bool                       m_HadExport;
+		bool                       m_MatchedExport;
 		bool                       m_MatchedPlatform;
 
 		unsigned int               m_CustomLevel;

@@ -70,6 +70,46 @@ static bool DoesEngineMatch(const char* value)
 	return strcmp(ParseEngine, value) == 0;
 }
 
+static bool DoesGameDllExport(const char *symbol)
+{
+	void *addressInBase = reinterpret_cast<void*>(MDLL_Spawn);
+
+	if (!addressInBase)
+	{
+		return false;
+	}
+
+#if defined PLATFORM_WINDOWS
+	MEMORY_BASIC_INFORMATION mem;
+
+	if (!VirtualQuery(addressInBase, &mem, sizeof(mem)))
+	{
+		return false;
+	}
+
+	return GetProcAddress(reinterpret_cast<HMODULE>(mem.AllocationBase), symbol) != nullptr;
+#elif defined PLATFORM_POSIX
+	Dl_info info;
+
+	if (!dladdr(addressInBase, &info))
+	{
+		return false;
+	}
+
+	void *handle = dlopen(info.dli_fname, RTLD_NOW);
+
+	if (!handle)
+	{
+		return false;
+	}
+
+	bool found = dlsym(handle, symbol) != nullptr;
+	dlclose(handle);
+
+	return found;
+#endif
+}
+
 CGameConfig::CGameConfig(const char *path) : m_FoundOffset(false), m_CustomLevel(0), m_CustomHandler(nullptr)
 {
 	strncopy(m_File, path, sizeof(m_File));
@@ -154,6 +194,8 @@ SMCResult CGameConfig::ReadSMC_NewSection(const SMCStates *states, const char *n
 				m_MatchedGame            = false;
 				m_HadEngine              = false;
 				m_MatchedEngine          = false;
+				m_HadExport              = false;
+				m_MatchedExport          = false;
 			}
 			else if (strcmp(name, "Signatures") == 0)
 			{
@@ -428,6 +470,15 @@ SMCResult CGameConfig::ReadSMC_KeyValue(const SMCStates *states, const char *key
 					m_ShouldBeReadingDefault = true;
 				}
 			}
+			else if (strcmp(key, "gamedll_export") == 0)
+			{
+				m_HadExport = true;
+
+				if (DoesGameDllExport(value))
+				{
+					m_MatchedExport = true;
+				}
+			}
 			break;
 		}
 		case PSTATE_GAMEDEFS_SIGNATURES_SIG:
@@ -585,6 +636,11 @@ SMCResult CGameConfig::ReadSMC_LeavingSection(const SMCStates *states)
 		case PSTATE_GAMEDEFS_SUPPORTED:
 		case PSTATE_GAMEDEFS_CRC:
 		{
+			if (m_ParseState == PSTATE_GAMEDEFS_SUPPORTED && m_HadExport)
+			{
+				m_ShouldBeReadingDefault = m_MatchedExport && (m_ShouldBeReadingDefault || (!m_HadGame && !m_HadEngine));
+			}
+
 			if (!m_ShouldBeReadingDefault)
 			{
 				m_IgnoreLevel = 1;
