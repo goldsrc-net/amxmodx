@@ -28,6 +28,10 @@ else:
 
 binary.compiler.linkflags += [AMXX.asmjit.binary]
 
+# AsmJit's executable memory uses shm_open, which is in librt before glibc 2.34.
+if builder.target_platform == 'linux':
+  binary.compiler.linkflags += ['-lrt']
+
 binary.sources = [
   '../../public/sdk/amxxmodule.cpp',
   '../../public/memtools/MemoryUtils.cpp',
