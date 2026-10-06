@@ -10,39 +10,85 @@
 //
 // Ham Sandwich Module
 //
-// How the game library returns a Vector from a virtual. The SDK Vector this
-// module is built with has a user-written copy constructor, so it is returned
-// through a hidden pointer. A game library whose Vector is trivially copyable
-// (halflife-updated: "= default") returns it in registers on 64-bit targets
-// (x86-64: xmm0/xmm1, AArch64: s0-s2). The gamedata key "vector_return"
-// "registers" selects that; anything else keeps the hidden pointer. On i386
-// every struct comes back through memory, so the key changes nothing there.
+// How the game library passes Vector by value: as a return value and as a
+// parameter. The SDK Vector this module is built with has a user-written copy
+// constructor, which makes it non-trivial for calls: it is returned through a
+// hidden pointer and passed as a pointer. A game library whose Vector is
+// trivially copyable (halflife-updated: "= default") passes it in registers
+// both ways on 64-bit targets (x86-64: x/y in one XMM, z in the next;
+// AArch64: s0-s2 style HFA). The same property of the type decides both, so
+// one gamedata key covers both: "vector_return" "registers". Anything else
+// keeps the pointer convention. On i386 nothing changes: struct returns go
+// through memory either way and by-value params are copied as stack slots.
 
 #ifndef VECTOR_RETURN_H
 #define VECTOR_RETURN_H
 
 #include "amxxmodule.h"
+#include <type_traits>
 
 extern bool VectorReturnInRegisters;
 
-// Trivially copyable, so the compiler returns it the way such a game library does.
-struct VectorReturn
+// Trivially copyable, so the compiler passes and returns it the way such a game library does.
+struct GameVector
 {
 	float x, y, z;
 };
 
 #if !defined(_WIN32)
+// The type a game library using registers sees for T, and the conversions.
+template <typename T> struct GameType
+{
+	typedef T type;
+	static T to(T v) { return v; }
+	static T from(T v) { return v; }
+};
+
+template <> struct GameType<void>
+{
+	typedef void type;
+};
+
+template <> struct GameType<Vector>
+{
+	typedef GameVector type;
+	static GameVector to(const Vector &v) { GameVector g = { v.x, v.y, v.z }; return g; }
+	static Vector from(const GameVector &g) { return Vector(g.x, g.y, g.z); }
+};
+
+// Call a game virtual of type F (written with the SDK Vector) the way the game
+// library expects Vector returns and by-value Vector params.
+template <typename F> struct GameCall;
+
+template <typename R, typename... P> struct GameCall<R (*)(P...)>
+{
+	template <typename... A>
+	static R call(void *func, A... args)
+	{
+#if !defined(__i386__)
+		if (VectorReturnInRegisters)
+		{
+			typedef typename GameType<R>::type (*GameFunc)(typename GameType<P>::type...);
+
+			if constexpr (std::is_void<R>::value)
+			{
+				reinterpret_cast<GameFunc>(func)(GameType<P>::to(static_cast<P>(args))...);
+				return;
+			}
+			else
+			{
+				return GameType<R>::from(reinterpret_cast<GameFunc>(func)(GameType<P>::to(static_cast<P>(args))...));
+			}
+		}
+#endif
+		return reinterpret_cast<R (*)(P...)>(func)(static_cast<P>(args)...);
+	}
+};
+
 template <typename... Args>
 inline Vector CallVectorReturn(void *func, void *pthis, Args... args)
 {
-#if !defined(__i386__)
-	if (VectorReturnInRegisters)
-	{
-		VectorReturn ret = reinterpret_cast<VectorReturn (*)(void *, Args...)>(func)(pthis, args...);
-		return Vector(ret.x, ret.y, ret.z);
-	}
-#endif
-	return reinterpret_cast<Vector (*)(void *, Args...)>(func)(pthis, args...);
+	return GameCall<Vector (*)(void *, Args...)>::call(func, pthis, args...);
 }
 #endif
 

@@ -18,6 +18,9 @@
 
 #if !defined(_WIN32)
 
+// gamedata "vector_return" "registers" (config_parser.cpp, vector_return.h)
+extern bool VectorReturnInRegisters;
+
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -161,24 +164,29 @@ namespace
 		return TypeId::kVoid;
 	}
 
+	// How a by-value Vector param is laid out in a signature.
+	//   Stack3:    i386: 3 Float stack slots copied verbatim (whatever the
+	//              game put there, bit for bit).
+	//   Registers: 64-bit game library whose Vector is trivially copyable
+	//              ("vector_return" "registers"):
+	//                amd64:   SysV splits the 12-byte struct in two
+	//                         eightbytes, x/y packed in one XMM
+	//                         (Float32x2) and z in the next (Float32).
+	//                aarch64: HFA-3, one float each in three V registers.
+	//   Pointer:   64-bit hidden pointer (the SDK Vector with its user-written
+	//              copy constructor). Also how the C dispatchers take it.
+	enum class VectorArg { Stack3, Registers, Pointer };
+
 	// Append `this` then each named param to a FuncSignature being built.
-	//
-	// Vector (HL SDK 3-float struct) classification per arch:
-	//   i386:    3 packed Float stack slots (everything is 4-byte stack on
-	//            x86 cdecl/thiscall; the compiler lays them out adjacent).
-	//   aarch64: HFA-3 → V0..V2 each holding one float. Expanding as 3
-	//            successive Float args lands in V0/V1/V2 exactly per AAPCS64.
-	//   amd64:   SysV classifies the 12-byte struct as two eightbytes —
-	//            bytes 0-7 (two floats) → XMM-N as packed Float32x2;
-	//            bytes 8-11 (one float) → XMM-(N+1) as Float32. AsmJit's
-	//            TypeId::kFloat32x2 occupies the low 64 bits of an XMM
-	//            register, matching what the C compiler emits for `Vector`
-	//            by value.
-	void append_args(FuncSignature& sig, const HamSig::HookSignature& hs)
+	void append_args(FuncSignature& sig, const HamSig::HookSignature& hs, VectorArg vec)
 	{
 		sig.add_arg(TypeId::kIntPtr);	// 'this'
 		for (uint8_t i = 0; i < hs.paramCount; ++i) {
-			if (hs.params[i] == HamSig::ParamKind::Vector) {
+			if (hs.params[i] != HamSig::ParamKind::Vector) {
+				sig.add_arg(param_type_id(hs.params[i]));
+			} else if (vec == VectorArg::Pointer) {
+				sig.add_arg(TypeId::kIntPtr);
+			} else {
 #if defined(__x86_64__)
 				sig.add_arg(TypeId::kFloat32x2);
 				sig.add_arg(TypeId::kFloat32);
@@ -187,8 +195,6 @@ namespace
 				sig.add_arg(TypeId::kFloat32);
 				sig.add_arg(TypeId::kFloat32);
 #endif
-			} else {
-				sig.add_arg(param_type_id(hs.params[i]));
 			}
 		}
 	}
@@ -266,13 +272,23 @@ void *CreateGenericTrampoline(const HamSig::HookSignature& hs,
 
 	NativeCompiler cc(&code);
 
+	// By-value Vector params: verbatim stack slots on i386; on 64-bit the
+	// game passes them as the gamedata says and the dispatchers take a pointer.
+#if defined(__i386__)
+	const VectorArg vec_in = VectorArg::Stack3;
+	const VectorArg vec_out = VectorArg::Stack3;
+#else
+	const VectorArg vec_in = VectorReturnInRegisters ? VectorArg::Registers : VectorArg::Pointer;
+	const VectorArg vec_out = VectorArg::Pointer;
+#endif
+
 	// Incoming signature: matches the original virtual method ABI.
 	// VectorSret returns a hidden first-arg pointer (Linux/Mac sret style).
 	FuncSignature incoming(CallConvId::kCDecl);
 	incoming.set_ret(return_type_id(hs.ret));
 	if (hs.ret == HamSig::ReturnKind::VectorSret)
 		incoming.add_arg(TypeId::kIntPtr);
-	append_args(incoming, hs);
+	append_args(incoming, hs, vec_in);
 
 	FuncNode *fn = cc.add_func(incoming);
 
@@ -293,21 +309,50 @@ void *CreateGenericTrampoline(const HamSig::HookSignature& hs,
 	outgoing.add_arg(TypeId::kIntPtr);	// extraptr (Hook*)
 	if (hs.ret == HamSig::ReturnKind::VectorSret)
 		outgoing.add_arg(TypeId::kIntPtr);
-	append_args(outgoing, hs);
+	append_args(outgoing, hs, vec_out);
 
-	// Materialize extraptr before the call: the compiler emits nodes in
-	// order, so a mov added after invoke() would run after the call.
+	// Everything below up to invoke() runs before the call: the compiler
+	// emits nodes in order, so code added after invoke() would run after it.
 	Reg extra_reg = cc.new_gp_ptr();
 	mov_imm_ptr(cc, extra_reg, uintptr_t(extraptr));
 
+	// Outgoing args in order. A Vector that came in registers is stored to a
+	// stack slot and passed by address, the way the dispatchers take it.
+	std::vector<Reg> out_regs;
+	out_regs.push_back(extra_reg);
+	size_t in = 0;
+	if (hs.ret == HamSig::ReturnKind::VectorSret)
+		out_regs.push_back(arg_regs[in++]);
+	out_regs.push_back(arg_regs[in++]);	// this
+	for (uint8_t i = 0; i < hs.paramCount; ++i) {
+		if (hs.params[i] != HamSig::ParamKind::Vector || vec_in == vec_out) {
+			const size_t n = (hs.params[i] == HamSig::ParamKind::Vector && vec_in == VectorArg::Stack3) ? 3 : 1;
+			for (size_t k = 0; k < n; ++k)
+				out_regs.push_back(arg_regs[in++]);
+			continue;
+		}
+#if defined(__x86_64__)
+		x86::Mem slot = cc.new_stack(16, 16);
+		cc.movq(slot, arg_regs[in++].as<x86::Vec>());
+		cc.movss(slot.clone_adjusted(8), arg_regs[in++].as<x86::Vec>());
+		x86::Gp addr = cc.new_gp_ptr();
+		cc.lea(addr, slot);
+		out_regs.push_back(addr);
+#elif defined(__aarch64__)
+		a64::Mem slot = cc.new_stack(16, 16);
+		cc.str(arg_regs[in++].as<a64::Vec>(), slot);
+		cc.str(arg_regs[in++].as<a64::Vec>(), slot.clone_adjusted(4));
+		cc.str(arg_regs[in++].as<a64::Vec>(), slot.clone_adjusted(8));
+		a64::Gp addr = cc.new_gp_ptr();
+		cc.load_address_of(addr, slot);
+		out_regs.push_back(addr);
+#endif
+	}
+
 	InvokeNode *inv = invoke_target(cc, callee, outgoing);
 
-	// extraptr is the outgoing call's first arg.
-	inv->set_arg(0, extra_reg);
-
-	// Forward each incoming arg, shifted by +1 for the prepended extraptr.
-	for (size_t i = 0; i < arg_count; ++i)
-		inv->set_arg(i + 1, arg_regs[i]);
+	for (size_t i = 0; i < out_regs.size(); ++i)
+		inv->set_arg(i, out_regs[i]);
 
 	if (hs.ret == HamSig::ReturnKind::Void ||
 	    hs.ret == HamSig::ReturnKind::VectorSret) {
