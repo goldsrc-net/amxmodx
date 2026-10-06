@@ -806,7 +806,7 @@ int Handler::HandleError(const char *msg)
 
 	cell hea_addr, *phys_addr, result;
 
-	amx_PushString(m_pAmx, &hea_addr, &phys_addr, msg, 0, 0);
+	amx_PushString(m_pAmx, &hea_addr, &phys_addr, msg ? msg : "", 0, 0);
 	amx_Push(m_pAmx, pDebugger ? 1 : 0);
 	amx_Push(m_pAmx, error);
 	int err = amx_ExecPerf(m_pAmx, &result, m_iErrFunc);
