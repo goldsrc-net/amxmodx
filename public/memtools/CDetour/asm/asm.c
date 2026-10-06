@@ -307,6 +307,7 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 	int addr_size = 8;   /* default address size in 64-bit mode; 0x67 → 4 */
 	int twoByte = 0;
 	int threeByte = 0;
+	unsigned char escape3 = 0; /* 0x38 or 0x3A for a three-byte opcode */
 	unsigned char rex = 0;
 	unsigned char op = 0;
 	unsigned char modrm = 0;
@@ -343,6 +344,7 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 		op = *p++;
 		if (op == 0x38 || op == 0x3A) {
 			threeByte = 1;
+			escape3 = op;
 			op = *p++;
 		}
 	}
@@ -350,13 +352,16 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 	/* Decode based on opcode. We recognize the patterns used in compiler-emitted
 	 * function prologues and the few that appear inside copy ranges. The big
 	 * categories: */
+	/* Iz: a 16/32-bit immediate, still 32 bits (sign-extended) with REX.W */
+	int imm_z = op_size == 8 ? 4 : op_size;
+
 	if (!twoByte && !threeByte) {
-		/* one-byte opcodes */
+		/* one-byte opcodes; each case covers the eight opcodes op & 0xF8 maps to it */
 		switch (op & 0xF8) {
 		case 0x00: case 0x08: case 0x10: case 0x18: case 0x20: case 0x28: case 0x30: case 0x38:
 			/* arithmetic Eb/Ev,Gb/Gv etc. */
 			if ((op & 0x06) <= 0x03) { has_modrm = 1; }
-			else if (op & 0x04) { imm_size = (op & 0x01) ? op_size : 1; }
+			else if (op & 0x04) { imm_size = (op & 0x01) ? imm_z : 1; }
 			break;
 		case 0x40: /* 0x40-0x47 INC reg in 32-bit, REX-handled above in 64-bit */
 		case 0x48: /* 0x48-0x4F DEC/REX */
@@ -365,18 +370,22 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 		case 0x50: /* PUSH r64 */
 		case 0x58: /* POP r64 */
 			break;
+		case 0x60:
+			if (op == 0x63) { has_modrm = 1; } /* MOVSXD; the rest are invalid in 64-bit */
+			else return 0;
+			break;
 		case 0x68:
 			if (op == 0x68) imm_size = 4; /* PUSH imm32 */
 			else if (op == 0x6A) imm_size = 1; /* PUSH imm8 */
-			else if (op == 0x69) { has_modrm = 1; imm_size = op_size; } /* IMUL r,rm,imm */
+			else if (op == 0x69) { has_modrm = 1; imm_size = imm_z; } /* IMUL r,rm,imm */
 			else if (op == 0x6B) { has_modrm = 1; imm_size = 1; }       /* IMUL r,rm,imm8 */
 			break;
 		case 0x70: case 0x78: /* Jcc rel8 */
 			imm_size = 1;
 			is_jcc_short = 1;
 			break;
-		case 0x80:
-			if ((op & 0x07) <= 1) { has_modrm = 1; imm_size = (op & 0x01) ? op_size : 1; }
+		case 0x80: case 0x88:
+			if ((op & 0x07) <= 1 && op <= 0x81) { has_modrm = 1; imm_size = (op & 0x01) ? imm_z : 1; }
 			else if (op == 0x83) { has_modrm = 1; imm_size = 1; }
 			else if (op == 0x84 || op == 0x85 || op == 0x86 || op == 0x87) { has_modrm = 1; }
 			else if (op == 0x88 || op == 0x89 || op == 0x8A || op == 0x8B) { has_modrm = 1; } /* MOV */
@@ -388,10 +397,10 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 			break;
 		case 0x98: /* CWDE/CDQE etc. */
 			break;
-		case 0xA0: /* MOV AL,moffs */
-			if ((op & 0x07) <= 0x03) imm_size = addr_size; /* moffs */
+		case 0xA0: case 0xA8: /* MOV AL,moffs */
+			if (op <= 0xA3) imm_size = addr_size; /* moffs */
 			else if (op == 0xA8) imm_size = 1;
-			else if (op == 0xA9) imm_size = op_size;
+			else if (op == 0xA9) imm_size = imm_z;
 			break;
 		case 0xB0: /* MOV r8, imm8 */
 			imm_size = 1;
@@ -417,7 +426,7 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 			if (op == 0xD0 || op == 0xD1 || op == 0xD2 || op == 0xD3) has_modrm = 1;
 			else return 0; /* AAD/AAM/SALC and FPU prefix already consumed */
 			break;
-		case 0xE0: /* LOOP/LOOPE/LOOPNE rel8, IN/OUT */
+		case 0xE0: case 0xE8: /* LOOP/LOOPE/LOOPNE rel8, IN/OUT, CALL/JMP */
 			if (op <= 0xE3) { imm_size = 1; is_jcc_short = 1; }
 			else if (op == 0xE4 || op == 0xE6) imm_size = 1;
 			else if (op == 0xE5 || op == 0xE7) imm_size = 1;
@@ -427,7 +436,7 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 			else if (op == 0xEB) { imm_size = 1; is_jcc_short = 1; }    /* JMP rel8 */
 			else if (op == 0xEC || op == 0xED || op == 0xEE || op == 0xEF) {}
 			break;
-		case 0xF0:
+		case 0xF0: case 0xF8:
 			if (op == 0xF6) {
 				/* needs ModRM, then imm depends on subop */
 				modrm = p[0];
@@ -470,6 +479,13 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 		           op == 0xBF || op == 0xC0 || op == 0xC1) {
 			has_modrm = 1;
 			if (op == 0xA4 || op == 0xAC) imm_size = 1; /* SHLD/SHRD imm8 */
+		} else if (op >= 0xC2 && op <= 0xC6) {
+			has_modrm = 1; /* CMPPS/CMPSS, PINSRW, PEXTRW, SHUFPS: ModRM + imm8 */
+			imm_size = 1;
+		} else if (op == 0xC7) {
+			has_modrm = 1; /* CMPXCHG8B/16B */
+		} else if (op >= 0xC8 && op <= 0xCF) {
+			/* BSWAP r: no operand */
 		} else if ((op & 0xF0) == 0x10 || (op & 0xF0) == 0x20 ||
 		           (op & 0xF0) == 0x40 || (op & 0xF0) == 0x50 ||
 		           (op & 0xF0) == 0x60 || (op & 0xF0) == 0x70 ||
@@ -484,12 +500,10 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 			return 0;
 		}
 	} else {
-		/* 0F 38 / 0F 3A — three-byte. All have ModRM. */
+		/* 0F 38 / 0F 3A — three-byte. All have ModRM; every 0F 3A opcode also takes an imm8. */
 		has_modrm = 1;
 		if (threeByte && (op == 0x0F /*reserved*/)) return 0;
-		/* 0F 3A immediates: many take an imm8 byte */
-		/* Conservatively: no immediate unless we know better. Fail safely. */
-		(void)threeByte;
+		if (escape3 == 0x3A) imm_size = 1;
 	}
 
 	/* ModRM + SIB + displacement. */
