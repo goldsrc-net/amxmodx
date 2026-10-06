@@ -315,7 +315,7 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 	int imm_size = 0;
 	int rip_relative = 0;
 	int is_branch_imm32 = 0;   /* call/jmp/Jcc with rel32; needs fixup on copy */
-	int is_jcc_short = 0;      /* jmp short / Jcc short with rel8; not patched (in-bound) */
+	int is_jcc_short = 0;      /* jmp short / Jcc short / LOOP / JCXZ with rel8; refused when copying */
 
 	/* Legacy prefixes (group 1-4). Multiple allowed in any order. */
 	for (;;) {
@@ -541,6 +541,11 @@ static int decode_one_x64(unsigned char *func, unsigned char *dest, intptr_t cop
 
 	/* Copy if requested, with PC-relative fixup. */
 	if (out) {
+		if (is_jcc_short) {
+			/* A rel8 branch may target past the copied bytes, which it can't reach from
+			 * the trampoline, and widening it would change the copy's length; refuse it. */
+			return 0;
+		}
 		if (is_branch_imm32) {
 			/* Layout: ... opcode (E8/E9 or 0F 8x) followed by 4-byte rel32 IS
 			 * located at p-4..p. The imm32 is signed offset from the byte
