@@ -570,11 +570,11 @@ public cmdBanIP(id, level, cid)
 		len += formatex(msg[len], charsmax(msg) - len, " %s ", name2);
 		if (nNum)
 		{
-			formatex(msg[len], charsmax(msg) - len, "%L", plr, "FOR_MIN", minutes);
+			len += formatex(msg[len], charsmax(msg) - len, "%L", plr, "FOR_MIN", minutes);
 		}
 		else
 		{
-			formatex(msg[len], charsmax(msg) - len, "%L", plr, "PERM");
+			len += formatex(msg[len], charsmax(msg) - len, "%L", plr, "PERM");
 		}
 		if (strlen(reason) > 0)
 		{
@@ -1146,7 +1146,7 @@ public cmdPause(id, level, cid)
 	get_players(players, pnum, "ch")
 	for (new i; i<pnum; i++)
 	{
-		show_activity_id(players[i], id, name, "%L server", i, g_Paused ? "UNPAUSE" : "PAUSE");
+		show_activity_id(players[i], id, name, "%L server", players[i], g_Paused ? "UNPAUSE" : "PAUSE");
 	}
 
 	g_pauseCon = id
