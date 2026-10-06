@@ -238,11 +238,14 @@ void *CreateGenericTrampoline(const HamSig::HookSignature& hs,
 		outgoing.add_arg(TypeId::kIntPtr);
 	append_args(outgoing, hs);
 
-	InvokeNode *inv = invoke_target(cc, callee, outgoing);
-
-	// Materialize extraptr as the outgoing call's first arg.
+	// Materialize extraptr before the call: the compiler emits nodes in
+	// order, so a mov added after invoke() would run after the call.
 	Reg extra_reg = cc.new_gp_ptr();
 	mov_imm_ptr(cc, extra_reg, uintptr_t(extraptr));
+
+	InvokeNode *inv = invoke_target(cc, callee, outgoing);
+
+	// extraptr is the outgoing call's first arg.
 	inv->set_arg(0, extra_reg);
 
 	// Forward each incoming arg, shifted by +1 for the prepended extraptr.
