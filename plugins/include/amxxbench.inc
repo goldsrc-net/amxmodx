@@ -67,6 +67,10 @@ native bench_puppet_angles(id, const Float:angles[3]);
 // handlers, read_argv/read_args and the game all see it. Example: bench_puppet_cmd(id, "kill").
 native bench_puppet_cmd(id, const fmt[], any:...);
 
+// Sets a userinfo key on the puppet the way a client's setinfo does: the game and plugins
+// (client_infochanged) see the change. Examples: "_pw" before a login check, "name" for a rename.
+native bench_puppet_setinfo(id, const key[], const value[]);
+
 // Says text in chat (team: say_team), as typed into the chat box.
 stock bench_puppet_say(id, const text[], bool:team = false)
 {
@@ -77,7 +81,8 @@ stock bench_puppet_say(id, const text[], bool:team = false)
 // Messages. Every user message sent to a puppet during the current test is recorded with its
 // arguments, along with messages sent to all players. A BenchMsg: handle names one of them; 0 is
 // none. name filters by message name ("SayText", "TextMsg", "ShowMenu", ...), text by a substring
-// of any string argument. Both are optional.
+// of any string argument. Both are optional. Text the engine prints to a puppet (engclient_print,
+// console_print) is recorded too, under the names "console", "center" and "chat".
 
 // Whether this engine supports capture (ReHLDS 3.15+, or the stock HLDS engine).
 native bool:bench_msg_available();
@@ -290,3 +295,11 @@ stock bench_fixture(const name[], path[], len)
 		copy(dir, charsmax(dir), "addons/amxmodx/plugins");
 	return formatex(path, len, "%s/tests/fixtures/%s", dir, name);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Coverage
+
+// Leaves lines first..last of a source file (by name, e.g. "admin.sma") out of coverage; the
+// report lists them with the reason. For code a test cannot reach, such as listen-server-only
+// paths. Call it from the test file (plugin_init or bench_setup), not from the plugin under test.
+native bench_coverage_ignore(const file[], first, last, const reason[]);

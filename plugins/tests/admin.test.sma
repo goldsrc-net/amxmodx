@@ -24,6 +24,11 @@ new g_Puppet
 public plugin_init()
 {
 	register_plugin("Admin Base Tests", AMXX_VERSION_STR, "AMXX Dev Team")
+
+	bench_coverage_ignore("admin.sma", 154, 154, "a connected player without an auth ID: before Steam validates them, which puppets never are")
+	bench_coverage_ignore("admin.sma", 230, 230, "an address lookup only runs for text that is not an address, so it never finds a player")
+	bench_coverage_ignore("admin.sma", 326, 326, "users.ini existing but not writable, which a plugin cannot arrange")
+	bench_coverage_ignore("admin.sma", 792, 792, "listen servers only")
 }
 
 public bench_setup()
@@ -31,7 +36,12 @@ public bench_setup()
 	get_configsdir(g_UsersFile, charsmax(g_UsersFile))
 	formatex(g_SavedUsers, charsmax(g_SavedUsers), "%s/users.ini.bench", g_UsersFile)
 	add(g_UsersFile, charsmax(g_UsersFile), "/users.ini")
-	rename_file(g_UsersFile, g_SavedUsers, 1)
+	// A saved copy already there is the server's own, left by a run that stopped before teardown:
+	// keep it, and drop the users.ini that run wrote.
+	if (file_exists(g_SavedUsers))
+		delete_file(g_UsersFile)
+	else
+		rename_file(g_UsersFile, g_SavedUsers, 1)
 	g_Puppet = 0
 }
 
@@ -429,5 +439,65 @@ public admin_reloads(flags)
 	WriteUsers("^"STEAM_0:0:3003^" ^"^" ^"h^" ^"ce^"|^"STEAM_0:0:3004^" ^"^" ^"h^" ^"ce^"")
 	bench_puppet_cmd(g_Puppet, "amx_reloadadmins")
 	ASSERT_EQ(admins_num(), 2)
+	bench_pass()
+}
+
+public test_password_login()
+{
+	// A name account with a password and no kick flag: a wrong password only says so.
+	WriteUsers("^"pwplayer^" ^"secret^" ^"d^" ^"^"")
+	Reload()
+	g_Puppet = bench_puppet("pwplayer")
+	ASSERT(g_Puppet > 0)
+	bench_wait_until("told_invalid_password", "send_password", 5.0)
+}
+
+public told_invalid_password()
+{
+	return bench_msg_last(g_Puppet, "console", "Invalid Password!") != BenchMsg:0
+}
+
+public send_password()
+{
+	ASSERT_EQ(get_user_flags(g_Puppet), 0)
+	bench_puppet_setinfo(g_Puppet, "_pw", "secret")
+	Reload()
+	new expected = read_flags("d")
+	ASSERT_EQ(get_user_flags(g_Puppet), expected)
+	ASSERT_MSG(g_Puppet, "console", "Password accepted")
+	ASSERT_MSG(g_Puppet, "console", "Privileges set")
+	bench_pass()
+}
+
+public test_rename_logs_in()
+{
+	WriteUsers("^"Renamed^" ^"^" ^"i^" ^"e^"")
+	Reload()
+	g_Puppet = bench_puppet("before")
+	ASSERT(g_Puppet > 0)
+	bench_wait_until("has_flags", "rename", 5.0, ADMIN_USER)
+}
+
+public rename(flags)
+{
+	bench_puppet_setinfo(g_Puppet, "name", "Renamed")
+	new expected = read_flags("i")
+	ASSERT_EQ(get_user_flags(g_Puppet), expected)
+	bench_pass()
+}
+
+public test_rename_away_from_case_sensitive_name()
+{
+	WriteUsers("^"Exact^" ^"^" ^"i^" ^"ek^"")
+	Reload()
+	g_Puppet = bench_puppet("Exact")
+	ASSERT(g_Puppet > 0)
+	bench_wait_until("has_flags", "rename_away", 5.0, read_flags("i"))
+}
+
+public rename_away(flags)
+{
+	bench_puppet_setinfo(g_Puppet, "name", "exact")
+	ASSERT_EQ(get_user_flags(g_Puppet), ADMIN_USER)
 	bench_pass()
 }
