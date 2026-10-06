@@ -141,7 +141,7 @@ stock DisplayPluginMenu(id,const MenuText[], const Handler[], const Command[], c
 				if (strcmp(PluginState,"running",true)==0 ||
 					strcmp(PluginState,"debug",  true)==0)
 				{
-					menu_additem(Menu,MenuText,PluginCmd,EnabledCallback);
+					menu_additem(Menu,MenuText,PluginCmd,_,EnabledCallback);
 				}
 				else
 				{
@@ -187,8 +187,8 @@ stock bool:GetPlidForValidPlugins(id, &plid)
 		{
 			get_plugin(i,BufferFile,charsmax(BufferFile),BufferName,charsmax(BufferName),"",0,"",0,BufferState,charsmax(BufferState));
 			
-			if (strcmp(BufferFile,TargetPlugin,true) != 0||
-				strcmp(BufferName,TargetPlugin,true) != 0)
+			if (strcmp(BufferFile,TargetPlugin,true) == 0||
+				strcmp(BufferName,TargetPlugin,true) == 0)
 			{
 				// We have a match.
 				
