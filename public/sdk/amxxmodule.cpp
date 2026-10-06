@@ -2427,6 +2427,8 @@ PFN_AMX_REREGISTER			g_fn_AmxReRegister;
 PFN_REGISTERFUNCTIONEX		g_fn_RegisterFunctionEx;
 PFN_MESSAGE_BLOCK			g_fn_MessageBlock;
 PFN_GET_CONFIG_MANAGER		g_fn_GetConfigManager;
+PFN_POINTER_TO_HANDLE		g_fn_PointerToHandle;
+PFN_HANDLE_TO_POINTER		g_fn_HandleToPointer;
 
 // *** Exports ***
 C_DLLEXPORT int AMXX_Query(int *interfaceVersion, amxx_module_info_s *moduleInfo)
@@ -2487,6 +2489,8 @@ C_DLLEXPORT int AMXX_Attach(PFN_REQ_FNPTR reqFnptrFunc)
 	REQFUNC("RegisterFunction", g_fn_RegisterFunction, PFN_REGISTERFUNCTION);
 	REQFUNC("RegisterFunctionEx", g_fn_RegisterFunctionEx, PFN_REGISTERFUNCTIONEX);
 	REQFUNC("GetConfigManager", g_fn_GetConfigManager, PFN_GET_CONFIG_MANAGER);
+	REQFUNC("PointerToHandle", g_fn_PointerToHandle, PFN_POINTER_TO_HANDLE);
+	REQFUNC("HandleToPointer", g_fn_HandleToPointer, PFN_HANDLE_TO_POINTER);
 
 	// Amx scripts
 	REQFUNC("GetAmxScript", g_fn_GetAmxScript, PFN_GET_AMXSCRIPT);
@@ -2717,6 +2721,8 @@ void ValidateMacros_DontCallThis_Smiley()
 	MF_OverrideNatives(NULL, NULL);
 	MF_MessageBlock(0, 0, NULL);
 	MF_GetConfigManager();
+	MF_PointerToHandle(NULL);
+	MF_HandleToPointer(0);
 }
 #endif
 
