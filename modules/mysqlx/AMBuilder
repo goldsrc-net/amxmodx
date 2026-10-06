@@ -48,9 +48,14 @@ if AMXX.mysql_path:
         '-lm',
       ]
     else:
+      # The archive may carry its TLS library (OpenSSL) inside. Keep everything it brings local to
+      # the module, so the client's calls cannot bind to another copy already in the process (an
+      # engine linked against a different libssl, for one).
       binary.compiler.linkflags += [
         os.path.join(AMXX.mysql_path, 'lib', 'libmysqlclient_r.a'),
+        '-Wl,--exclude-libs,ALL',
         '-lpthread',
+        '-ldl',
         '-lm',
       ]
     if builder.target_platform == 'linux':
