@@ -28,6 +28,7 @@
 
 #include "ham_const.h"	
 #include "ham_utils.h"
+#include "vector_return.h"
 
 #include "DataHandler.h"
 
@@ -868,7 +869,7 @@ void Hook_Vector_Float_Cbase_Int(Hook *hook, Vector *out, void *pthis, float f1,
 #if defined(_WIN32)
 	reinterpret_cast<void (__fastcall*)(void*, int, Vector *, float, void *, int)>(hook->func)(pthis, 0, &origret, f1, cb, i1);
 #elif defined(__linux__) || defined(__APPLE__)
-	origret = reinterpret_cast<Vector(*)(void*, float, void *, int)>(hook->func)(pthis, f1, cb, i1);
+	origret = CallVectorReturn(hook->func, pthis, f1, cb, i1);
 #endif
 
 	POST_START()
@@ -1047,7 +1048,7 @@ void Hook_Vector_Void(Hook *hook, Vector *out, void *pthis)
 #if defined(_WIN32)
 	reinterpret_cast<void (__fastcall*)(void*, int, Vector *)>(hook->func)(pthis, 0, &origret);
 #elif defined(__linux__) || defined(__APPLE__)
-	origret=reinterpret_cast<Vector (*)(void *)>(hook->func)(pthis);
+	origret = CallVectorReturn(hook->func, pthis);
 #endif
 
 	POST_START()
@@ -1084,7 +1085,7 @@ void Hook_Vector_pVector(Hook *hook, Vector *out, void *pthis, Vector *v1)
 #if defined(_WIN32)
 	reinterpret_cast<void (__fastcall*)(void*, int, Vector *, Vector *)>(hook->func)(pthis, 0, &origret, v1);
 #elif defined(__linux__) || defined(__APPLE__)
-	origret=reinterpret_cast<Vector (*)(void*, Vector *)>(hook->func)(pthis, v1);
+	origret = CallVectorReturn(hook->func, pthis, v1);
 #endif
 
 	POST_START()
@@ -1486,7 +1487,7 @@ void Hook_Vector_Float(Hook *hook, Vector *out, void *pthis, float f1)
 #if defined(_WIN32)
 		reinterpret_cast<void (__fastcall*)(void*, int, Vector *, float)>(hook->func)(pthis, 0, &origret, f1);
 #elif defined(__linux__) || defined(__APPLE__)
-		origret=reinterpret_cast<Vector (*)(void *, float)>(hook->func)(pthis, f1);
+		origret = CallVectorReturn(hook->func, pthis, f1);
 #endif
 
 	POST_START()
@@ -3281,7 +3282,7 @@ void Hook_Vector_Vector_Vector_Vector(Hook *hook, Vector *out, void *pthis, Vect
 #if defined(_WIN32)
 	reinterpret_cast<void (__fastcall*)(void*, int, Vector *, Vector, Vector, Vector)>(hook->func)(pthis, 0, &origret, v1, v2, v3);
 #elif defined(__linux__) || defined(__APPLE__)
-	origret=reinterpret_cast<Vector (*)(void*, Vector, Vector, Vector)>(hook->func)(pthis, v1, v2, v3);
+	origret = CallVectorReturn(hook->func, pthis, v1, v2, v3);
 #endif
 
 	POST_START()
@@ -3362,3 +3363,58 @@ void Hook_Deprecated(Hook* hook)
 {
 
 }
+
+#if !defined(_WIN32)
+// Register-returning entry points for game libraries with "vector_return"
+// "registers": the trampoline tail-jumps here, the Vector comes back in
+// registers like the game's own virtual returns it.
+static VectorReturn ToVectorReturn(const Vector &v)
+{
+	VectorReturn ret = { v.x, v.y, v.z };
+	return ret;
+}
+
+VectorReturn Hook_Vector_Float_Cbase_Int_Reg(Hook *hook, void *pthis, float f1, void *cb, int i1)
+{
+	Vector out;
+	Hook_Vector_Float_Cbase_Int(hook, &out, pthis, f1, cb, i1);
+	return ToVectorReturn(out);
+}
+
+VectorReturn Hook_Vector_Void_Reg(Hook *hook, void *pthis)
+{
+	Vector out;
+	Hook_Vector_Void(hook, &out, pthis);
+	return ToVectorReturn(out);
+}
+
+VectorReturn Hook_Vector_pVector_Reg(Hook *hook, void *pthis, Vector *v1)
+{
+	Vector out;
+	Hook_Vector_pVector(hook, &out, pthis, v1);
+	return ToVectorReturn(out);
+}
+
+VectorReturn Hook_Vector_Float_Reg(Hook *hook, void *pthis, float f1)
+{
+	Vector out;
+	Hook_Vector_Float(hook, &out, pthis, f1);
+	return ToVectorReturn(out);
+}
+
+void *GetRegisterReturnDispatcher(void *target)
+{
+	if (target == reinterpret_cast<void *>(Hook_Vector_Float_Cbase_Int))
+		return reinterpret_cast<void *>(Hook_Vector_Float_Cbase_Int_Reg);
+	if (target == reinterpret_cast<void *>(Hook_Vector_Void))
+		return reinterpret_cast<void *>(Hook_Vector_Void_Reg);
+	if (target == reinterpret_cast<void *>(Hook_Vector_pVector))
+		return reinterpret_cast<void *>(Hook_Vector_pVector_Reg);
+	if (target == reinterpret_cast<void *>(Hook_Vector_Float))
+		return reinterpret_cast<void *>(Hook_Vector_Float_Reg);
+
+	// Hook_Vector_Vector_Vector_Vector also takes Vector by value, which this
+	// module's SDK Vector passes differently from such a game library.
+	return nullptr;
+}
+#endif

@@ -16,6 +16,7 @@
 
 #include "forward.h"
 #include "Trampolines.h"
+#include "vector_return.h"
 #include <amtl/am-vector.h>
 #include <amtl/am-string.h>
 
@@ -54,7 +55,27 @@ public:
 
 			// install a trampoline that prepends `this` (the owning Hook*)
 			// before forwarding to `target` (the C dispatcher Hook_<TAG>).
+#if !defined(_WIN32) && (defined(__x86_64__) || defined(__aarch64__))
+			if (sig_.ret == HamSig::ReturnKind::VectorSret && VectorReturnInRegisters)
+			{
+				// the game returns Vector in registers: tail-jump to a dispatcher that does too
+				void *regTarget = GetRegisterReturnDispatcher(target);
+				tramp = regTarget ? Trampolines::CreateRegisterReturnTrampoline(sig_, (void*)this, regTarget, &trampSize) : NULL;
+			}
+			else
+#endif
 			tramp = Trampolines::CreateGenericTrampoline(sig_, (void*)this, target, &trampSize);
+
+			size_t len=strlen(name);
+			ent=new char[len+1];
+
+			ke::SafeSprintf(ent, len + 1, "%s", name);
+
+			if (!tramp)
+			{
+				MF_Log("Could not create a trampoline for a hook on \"%s\"; the hook is not installed", ent);
+				return;
+			}
 
 			// Insert into vtable
 #if defined(_WIN32)
@@ -65,11 +86,6 @@ public:
 			mprotect(addr,sysconf(_SC_PAGESIZE),PROT_READ|PROT_WRITE);
 #endif
 			ivtable[entry]=(int*)tramp;
-
-			size_t len=strlen(name);
-			ent=new char[len+1];
-
-			ke::SafeSprintf(ent, len + 1, "%s", name);
 		};
 
 	~Hook()
@@ -77,16 +93,19 @@ public:
 		// Insert the original function back into the vtable
 		int **ivtable=(int **)vtable;
 
+		if (tramp)
+		{
 #if defined(_WIN32)
-		DWORD OldFlags;
-		VirtualProtect(&ivtable[entry],sizeof(int*),PAGE_READWRITE,&OldFlags);
+			DWORD OldFlags;
+			VirtualProtect(&ivtable[entry],sizeof(int*),PAGE_READWRITE,&OldFlags);
 #elif defined(__linux__) || defined(__APPLE__)
-		void *addr = (void *)ALIGN(&ivtable[entry]);
-		mprotect(addr,sysconf(_SC_PAGESIZE),PROT_READ|PROT_WRITE);
+			void *addr = (void *)ALIGN(&ivtable[entry]);
+			mprotect(addr,sysconf(_SC_PAGESIZE),PROT_READ|PROT_WRITE);
 #endif
 
-		ivtable[entry]=(int *)func;
-		Trampolines::FreeTrampoline(tramp, trampSize);
+			ivtable[entry]=(int *)func;
+			Trampolines::FreeTrampoline(tramp, trampSize);
+		}
 
 		delete[] ent;
 

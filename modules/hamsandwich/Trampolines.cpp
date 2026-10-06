@@ -86,6 +86,25 @@ namespace
 #endif
 	}
 
+	void *Install(CodeHolder& code, int *outSize)
+	{
+		const size_t code_size = code.code_size();
+		void *buf = AllocExec(code_size);
+		if (!buf)
+			return nullptr;
+
+		if (code.relocate_to_base(uintptr_t(buf)) != kErrorOk) {
+			FreeExec(buf, code_size);
+			return nullptr;
+		}
+		code.copy_flattened_data(buf, code_size, CopySectionFlags::kPadSectionBuffer);
+		FlushICache(buf, code_size);
+
+		if (outSize)
+			*outSize = int(code_size);
+		return buf;
+	}
+
 	TypeId param_type_id(HamSig::ParamKind k)
 	{
 		using HamSig::ParamKind;
@@ -269,22 +288,57 @@ void *CreateGenericTrampoline(const HamSig::HookSignature& hs,
 	if (cc.finalize() != kErrorOk)
 		return nullptr;
 
-	const size_t code_size = code.code_size();
-	void *buf = AllocExec(code_size);
-	if (!buf)
-		return nullptr;
-
-	if (code.relocate_to_base(uintptr_t(buf)) != kErrorOk) {
-		FreeExec(buf, code_size);
-		return nullptr;
-	}
-	code.copy_flattened_data(buf, code_size, CopySectionFlags::kPadSectionBuffer);
-	FlushICache(buf, code_size);
-
-	if (outSize)
-		*outSize = int(code_size);
-	return buf;
+	return Install(code, outSize);
 }
+
+#if defined(__x86_64__) || defined(__aarch64__)
+void *CreateRegisterReturnTrampoline(const HamSig::HookSignature& hs,
+                                     void *extraptr, void *callee,
+                                     int *outSize)
+{
+	using namespace asmjit;
+
+	// Integer-class args: 'this' plus every Int32/Pointer param. Floats and
+	// Vectors travel in FP registers, which the inserted Hook* does not move.
+	size_t gp = 1;
+	for (uint8_t i = 0; i < hs.paramCount; ++i) {
+		if (hs.params[i] == HamSig::ParamKind::Int32 ||
+		    hs.params[i] == HamSig::ParamKind::Pointer)
+			++gp;
+	}
+
+	CodeHolder code;
+	if (code.init(jit_runtime().environment(), jit_runtime().cpu_features()) != kErrorOk)
+		return nullptr;
+
+	// Shift the integer args up one register, put extraptr first and tail-jump
+	// to callee: its return registers reach the caller untouched.
+#if defined(__x86_64__)
+	static const x86::Gp args[] = { x86::rdi, x86::rsi, x86::rdx, x86::rcx, x86::r8, x86::r9 };
+	if (gp + 1 > sizeof(args) / sizeof(args[0]))
+		return nullptr;
+
+	x86::Assembler a(&code);
+	for (size_t i = gp; i > 0; --i)
+		a.mov(args[i], args[i - 1]);
+	a.mov(x86::rdi, imm(uintptr_t(extraptr)));
+	a.mov(x86::rax, imm(uintptr_t(callee)));
+	a.jmp(x86::rax);
+#else
+	if (gp + 1 > 8)
+		return nullptr;
+
+	a64::Assembler a(&code);
+	for (size_t i = gp; i > 0; --i)
+		a.mov(a64::x(uint32_t(i)), a64::x(uint32_t(i - 1)));
+	a.mov(a64::x0, Imm(uintptr_t(extraptr)));
+	a.mov(a64::x16, Imm(uintptr_t(callee)));
+	a.br(a64::x16);
+#endif
+
+	return Install(code, outSize);
+}
+#endif
 
 void FreeTrampoline(void *tramp, int size)
 {

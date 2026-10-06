@@ -15,6 +15,7 @@
 
 #include "offsets.h"
 #include "ham_utils.h"
+#include "vector_return.h"
 #include "hooklist.h"
 #include "forward.h"
 #include "hook.h"
@@ -459,7 +460,7 @@ cell Call_Vector_Float_Cbase_Int(AMX *amx, cell *params)
 	Vector ret;
 	reinterpret_cast<void(__fastcall *)(void *, int, Vector*, float, void *, int)>(__func)(pv, 0, &ret, f3, p4, i5);
 #elif defined(__linux__) || defined(__APPLE__)
-	Vector ret = reinterpret_cast<Vector(*)(void *, float, void *, int)>(__func)(pv, f3, p4, i5);
+	Vector ret = CallVectorReturn(__func, pv, f3, p4, i5);
 #endif
 
 	float *out = (float *)MF_GetAmxAddr(amx, params[6]);
@@ -604,7 +605,7 @@ cell Call_Vector_Void(AMX *amx, cell *params)
 	Vector ret;
 	reinterpret_cast<void (__fastcall *)(void *, int,Vector*)>(__func)(pv, 0,&ret);
 #elif defined(__linux__) || defined(__APPLE__)
-	Vector ret=reinterpret_cast<Vector (*)(void *)>(__func)(pv);
+	Vector ret = CallVectorReturn(__func, pv);
 #endif
 	float *out=(float *)MF_GetAmxAddr(amx, params[3]);
 	out[0]=ret.x;
@@ -628,7 +629,7 @@ cell Call_Vector_pVector(AMX *amx, cell *params)
 	Vector ret;
 	reinterpret_cast<void (__fastcall *)(void *, int, Vector*, Vector*)>(__func)(pv, 0, &ret, &v3);
 #elif defined(__linux__) || defined(__APPLE__)
-	Vector ret=reinterpret_cast<Vector (*)(void *, Vector*)>(__func)(pv, &v3);
+	Vector ret = CallVectorReturn(__func, pv, &v3);
 #endif
 	float *out=(float *)MF_GetAmxAddr(amx, params[4]);
 	out[0]=ret.x;
@@ -888,7 +889,7 @@ cell Call_Vector_Float(AMX *amx, cell *params)
 	Vector ret;
 	reinterpret_cast<void (__fastcall *)(void *, int, Vector*, float)>(__func)(pv, 0, &ret, f3);
 #elif defined(__linux__) || defined(__APPLE__)
-	Vector ret = reinterpret_cast<Vector(*)(void *, float)>(__func)(pv, f3);
+	Vector ret = CallVectorReturn(__func, pv, f3);
 #endif
 	float *out=(float *)MF_GetAmxAddr(amx, params[4]);
 	out[0]=ret.x;
@@ -2055,7 +2056,7 @@ cell Call_Vector_Vector_Vector_Vector(AMX *amx, cell *params)
 	Vector ret;
 	reinterpret_cast<void (__fastcall *)(void *, int, Vector*, Vector, Vector, Vector)>(__func)(pv, 0, &ret, v3, v4, v5);
 #elif defined(__linux__) || defined(__APPLE__)
-	Vector ret=reinterpret_cast<Vector (*)(void *, Vector, Vector, Vector)>(__func)(pv, v3, v4, v5);
+	Vector ret = CallVectorReturn(__func, pv, v3, v4, v5);
 #endif
 	float *out=(float *)MF_GetAmxAddr(amx, params[6]);
 	out[0]=ret.x;

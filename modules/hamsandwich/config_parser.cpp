@@ -15,9 +15,11 @@
 #include "ham_const.h"
 #include "hooklist.h"
 #include "offsets.h"
+#include "vector_return.h"
 
 IGameConfig *CommonConfig;
 IGameConfigManager *ConfigManager;
+bool VectorReturnInRegisters;
 
 int ReadConfig(void)
 {
@@ -42,6 +44,11 @@ int ReadConfig(void)
 	{
 		Offsets.SetBase(value.fieldOffset);
 	}
+
+	// How the game library returns Vector from a virtual: "registers" or the
+	// default hidden pointer (see vector_return.h).
+	const char *vectorReturn = CommonConfig->GetKeyValue("vector_return");
+	VectorReturnInRegisters = vectorReturn && strcmp(vectorReturn, "registers") == 0;
 
 	for (auto index = 0; index < HAM_LAST_ENTRY_DONT_USE_ME_LOL; ++index)
 	{

@@ -37,6 +37,16 @@ namespace Trampolines
 	                              void *extraptr, void *callee,
 	                              int *outSize);
 
+#if !defined(_WIN32) && (defined(__x86_64__) || defined(__aarch64__))
+	// For a Vector-returning virtual of a game library that returns Vector in
+	// registers (gamedata "vector_return" "registers"): inserts `extraptr` as
+	// the first arg and tail-jumps to `callee`, which returns the Vector in
+	// registers itself. NULL if the signature needs stack args.
+	void *CreateRegisterReturnTrampoline(const HamSig::HookSignature& sig,
+	                                     void *extraptr, void *callee,
+	                                     int *outSize);
+#endif
+
 	// Release a trampoline buffer previously returned by CreateGenericTrampoline.
 	void FreeTrampoline(void *tramp, int size);
 }
