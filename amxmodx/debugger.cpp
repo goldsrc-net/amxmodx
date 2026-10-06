@@ -477,7 +477,9 @@ int AMXAPI Debugger::DebugHook(AMX *amx)
 
 	pDebugger = (Debugger *)amx->userdata[UD_DEBUGGER];
 
-	if (!pDebugger)
+	// Code run outside BeginExec/EndExec (a module calling amx_Exec directly, like the stats
+	// modules' score script) has no trace to step.
+	if (!pDebugger || pDebugger->m_Top < 0)
 		return AMX_ERR_NONE;
 
 	pDebugger->StepI();
