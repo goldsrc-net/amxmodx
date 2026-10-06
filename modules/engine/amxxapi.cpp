@@ -243,9 +243,12 @@ void StartFrame_Post()
 {
 	g_pFunctionTable_Post->pfnStartFrame = NULL;
 
-	LightStyleDetour->DisableDetour();
-	LIGHT_STYLE(0, glinfo.szLastLights);
-	LightStyleDetour->EnableDetour();
+	if (LightStyleDetour)
+	{
+		LightStyleDetour->DisableDetour();
+		LIGHT_STYLE(0, glinfo.szLastLights);
+		LightStyleDetour->EnableDetour();
+	}
 
 	RETURN_META(MRES_IGNORED);
 }
@@ -274,9 +277,17 @@ BOOL CheckForPublic(const char *publicname)
 void CreateDetours()
 {
 	LightStyleDetour = DETOUR_CREATE_STATIC_FIXED(LightStyle, (void*)(g_engfuncs.pfnLightStyle));
+
+	if (!LightStyleDetour)
+	{
+		MF_Log("LightStyle is not available - set_lights will not keep its lighting when the map changes it");
+	}
 }
 
 void DestroyDetours()
 {
-	LightStyleDetour->Destroy();
+	if (LightStyleDetour)
+	{
+		LightStyleDetour->Destroy();
+	}
 }

@@ -580,9 +580,16 @@ static cell AMX_NATIVE_CALL set_lights(AMX *amx, cell *params) {
 	//Reset LastLights and store custom lighting
 	ke::SafeStrcpy(glinfo.szLastLights, sizeof(glinfo.szLastLights), szLights);
 
-	LightStyleDetour->DisableDetour();
-	LIGHT_STYLE(0, glinfo.szLastLights);
-	LightStyleDetour->EnableDetour();
+	if (LightStyleDetour)
+	{
+		LightStyleDetour->DisableDetour();
+		LIGHT_STYLE(0, glinfo.szLastLights);
+		LightStyleDetour->EnableDetour();
+	}
+	else
+	{
+		LIGHT_STYLE(0, glinfo.szLastLights);
+	}
 
 	// These make it so that players/weaponmodels look like whatever the lighting is
 	// at. otherwise it would color players under the skybox to these values.
