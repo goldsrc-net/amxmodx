@@ -502,7 +502,7 @@ cell Call_Void_Entvar_Float_Vector_Trace_Int(AMX *amx, cell *params)
 	int id3=*MF_GetAmxAddr(amx, params[3]);
 	float f4=amx_ctof(*MF_GetAmxAddr(amx, params[4]));
 	Vector v5;
-	TraceResult *tr6=reinterpret_cast<TraceResult *>(*MF_GetAmxAddr(amx, params[6]));
+	TraceResult *tr6=reinterpret_cast<TraceResult *>(MF_HandleToPointer(*MF_GetAmxAddr(amx, params[6])));
 	int i7=*MF_GetAmxAddr(amx, params[7]);
 
 	float *fl5=(float *)MF_GetAmxAddr(amx, params[5]);
@@ -535,7 +535,7 @@ cell Call_Void_Float_Vector_Trace_Int(AMX *amx, cell *params)
 
 	float f3=amx_ctof(*MF_GetAmxAddr(amx, params[3]));
 	Vector v4;
-	TraceResult *tr5=reinterpret_cast<TraceResult *>(*MF_GetAmxAddr(amx, params[5]));
+	TraceResult *tr5=reinterpret_cast<TraceResult *>(MF_HandleToPointer(*MF_GetAmxAddr(amx, params[5])));
 	int i6=*MF_GetAmxAddr(amx, params[6]);
 
 	float *fl4=(float *)MF_GetAmxAddr(amx, params[4]);

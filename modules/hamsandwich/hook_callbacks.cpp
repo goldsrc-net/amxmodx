@@ -62,7 +62,7 @@ extern bool gDoForwards;
 #define P_CBASE(__PARAM, __INDEX)	__vec->append(new Data(RET_CBASE, (void *) & (__PARAM), reinterpret_cast<int *>(& (__INDEX))));
 #define P_ENTVAR(__PARAM, __INDEX)	__vec->append(new Data(RET_ENTVAR, (void *) & (__PARAM), reinterpret_cast<int *>(& (__INDEX))));
 #define P_EDICT(__PARAM, __INDEX)	__vec->append(new Data(RET_EDICT, (void *) & (__PARAM), reinterpret_cast<int *>(& (__INDEX))));
-#define P_TRACE(__PARAM)			__vec->append(new Data(RET_TRACE, (void *) (__PARAM)));
+#define P_TRACE(__PARAM)			__vec->append(new Data(RET_TRACE, (void *) & (__PARAM)));
 #define P_PTRVECTOR(__PARAM)		__vec->append(new Data(RET_VECTOR, (void *) (__PARAM)));
 #define P_PTRFLOAT(__PARAM)			__vec->append(new Data(RET_FLOAT, (void *) (__PARAM)));
 #define P_ITEMINFO(__PARAM)			__vec->append(new Data(RET_ITEMINFO, (void *) & (__PARAM)));
@@ -927,7 +927,7 @@ void Hook_Void_Entvar_Float_Vector_Trace_Int(Hook *hook, void *pthis, entvars_t 
 	P_INT(i1)
 
 	PRE_START()
-		,iev1, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), tr1, i1
+		,iev1, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), MF_PointerToHandle(tr1), i1
 	PRE_END()
 
 #if defined(_WIN32)
@@ -937,7 +937,7 @@ void Hook_Void_Entvar_Float_Vector_Trace_Int(Hook *hook, void *pthis, entvars_t 
 #endif
 
 	POST_START()
-		, iev1, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), tr1, i1
+		, iev1, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), MF_PointerToHandle(tr1), i1
 	POST_END()
 
 	KILL_VECTOR()
@@ -955,7 +955,7 @@ void Hook_Void_Float_Vector_Trace_Int(Hook *hook, void *pthis, float f1, Vector 
 	P_INT(i1)
 
 	PRE_START()
-		, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), tr1, i1
+		, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), MF_PointerToHandle(tr1), i1
 	PRE_END()
 
 #if defined(_WIN32)
@@ -965,7 +965,7 @@ void Hook_Void_Float_Vector_Trace_Int(Hook *hook, void *pthis, float f1, Vector 
 #endif
 
 	POST_START()
-		, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), tr1, i1
+		, f1, MF_PrepareCellArrayA(reinterpret_cast<cell *>(&v1), 3, false), MF_PointerToHandle(tr1), i1
 	POST_END()
 
 	KILL_VECTOR()

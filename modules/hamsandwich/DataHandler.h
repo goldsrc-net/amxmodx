@@ -134,7 +134,8 @@ public:
 		}
 		else if (IsType(RET_TRACE))
 		{
-			*(reinterpret_cast<int *>(m_data))=*data;
+			// m_data is the hooked call's TraceResult* parameter
+			*(reinterpret_cast<TraceResult **>(m_data))=reinterpret_cast<TraceResult *>(MF_HandleToPointer(*data));
 			return 0;
 		}
 
@@ -282,7 +283,7 @@ public:
 		}
 		else if (IsType(RET_TRACE))
 		{
-			*data=*(reinterpret_cast<int *>(m_data));
+			*data=MF_PointerToHandle(*(reinterpret_cast<TraceResult **>(m_data)));
 
 			return 0;
 		}

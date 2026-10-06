@@ -61,7 +61,7 @@ inline void CellToType(const AMX*& amx, const cell& in, Vector& out)
 
 inline void CellToType(const AMX*& amx, const cell& in, TraceResult*& out)
 {
-	out=reinterpret_cast<TraceResult*>(in);
+	out=reinterpret_cast<TraceResult*>(MF_HandleToPointer(in));
 }
 
 #endif
