@@ -104,8 +104,8 @@ public actionTelMenu(id, key)
 					}
 					if (VEC_DUCK_VIEW[2] > 0.0)
 					{
-						set_pev(id, pev_flags, pev(id, pev_flags) | FL_DUCKING)
-						set_pev(id, pev_view_ofs, VEC_DUCK_VIEW)
+						set_pev(player, pev_flags, pev(player, pev_flags) | FL_DUCKING)
+						set_pev(player, pev_view_ofs, VEC_DUCK_VIEW)
 					}
 				}
 				doTeleport(player, g_menuOrigin[id], g_menuVAngle[id])
