@@ -474,7 +474,10 @@ SMCResult CGameConfig::ReadSMC_KeyValue(const SMCStates *states, const char *key
 			{
 				m_HadExport = true;
 
-				if (DoesGameDllExport(value))
+				// "!symbol" matches a game library that does not export the symbol
+				bool negate = (value[0] == '!');
+
+				if (DoesGameDllExport(negate ? value + 1 : value) != negate)
 				{
 					m_MatchedExport = true;
 				}
