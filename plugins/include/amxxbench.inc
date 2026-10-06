@@ -132,44 +132,28 @@ stock bool:__bench_msg(id, const name[], const text[])
 	return false;
 }
 
-// Assertions. Each fails the test with the expression text, or the values compared.
-#define ASSERT(%0)              if (!bench_check(bool:(%0), #%0)) return
-#define ASSERT_TRUE(%0)         if (!bench_check(bool:(%0), #%0)) return
-#define ASSERT_FALSE(%0)        if (!__bench_false(bool:(%0), #%0)) return
-#define ASSERT_EQ(%0,%1)        if (!__bench_eq(%0, %1, #%0, #%1)) return
-#define ASSERT_STR_EQ(%0,%1)    if (!__bench_str_eq(%0, %1, #%0)) return
+// Assertions. Each fails the test with what was expected and received, and the report gives the
+// assertion's file:line. (They do not quote the expression: amxxpc cannot stringize an argument
+// that holds a string literal.) ASSERT_EQ(received, expected); ASSERT_STR_EQ(received, "expected").
+#define ASSERT(%0)              if (!bench_check(bool:(%0), "expected true, received false")) return
+#define ASSERT_TRUE(%0)         if (!bench_check(bool:(%0), "expected true, received false")) return
+#define ASSERT_FALSE(%0)        if (!bench_check(!(%0), "expected false, received true")) return
+#define ASSERT_EQ(%0,%1)        if (!__bench_eq(%0, %1)) return
+#define ASSERT_STR_EQ(%0,%1)    if (!__bench_str_eq(%0, %1)) return
 
-// (amxxpc 1.10 crashes on a literal joined to #%0, so the message is formatted here.)
-stock bool:__bench_false(bool:value, const what[])
+stock bool:__bench_eq(received, expected)
 {
-	if (!value)
+	if (received == expected)
 		return true;
-	bench_fail("%s is true, expected false", what);
+	bench_fail("expected %d, received %d", expected, received);
 	return false;
 }
 
-// Macro arguments keep the space after the comma; skip it when printing them.
-stock __bench_skip_space(const s[])
+stock bool:__bench_str_eq(const received[], const expected[])
 {
-	new i = 0;
-	while (s[i] == ' ')
-		i++;
-	return i;
-}
-
-stock bool:__bench_eq(a, b, const sa[], const sb[])
-{
-	if (a == b)
+	if (equal(received, expected))
 		return true;
-	bench_fail("%s == %s: got %d and %d", sa, sb[__bench_skip_space(sb)], a, b);
-	return false;
-}
-
-stock bool:__bench_str_eq(const a[], const b[], const sa[])
-{
-	if (equal(a, b))
-		return true;
-	bench_fail("%s == ^"%s^": got ^"%s^"", sa, b, a);
+	bench_fail("expected ^"%s^", received ^"%s^"", expected, received);
 	return false;
 }
 
