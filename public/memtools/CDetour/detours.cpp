@@ -180,7 +180,14 @@ jit_rewind:
 	/* Patch old bytes in (with PC-relative fixup for the moved location) */
 	if (wr.outbase != NULL)
 	{
-		copy_bytes((unsigned char *)detour_address, (unsigned char*)wr.outptr, detour_restore.bytes);
+		/* Fewer bytes back means a PC-relative operand could not be refitted at the
+		 * trampoline's address (more than 2 GB away on amd64); don't run a partial copy. */
+		if (copy_bytes((unsigned char *)detour_address, (unsigned char*)wr.outptr, detour_restore.bytes) != (int)detour_restore.bytes)
+		{
+			FreePageMemory(detour_trampoline, detour_trampolineSize);
+			detour_trampoline = NULL;
+			return false;
+		}
 	}
 	wr.outptr += detour_restore.bytes;
 
