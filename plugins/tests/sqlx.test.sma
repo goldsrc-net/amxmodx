@@ -19,6 +19,10 @@
 #include <sqlx>
 #include <amxxbench>
 
+// These tests use SQLite; load it rather than the include's default library (MySQL), which a
+// server need not have configured.
+#pragma loadlib sqlite
+
 #define TEST_DB "amxxbench_sqlxtest"
 
 new Handle:g_DbInfo
