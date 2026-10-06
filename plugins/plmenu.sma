@@ -144,7 +144,7 @@ public plugin_init()
 public plugin_cfg()
 {
 	new x = get_xvar_id("g_tempBans");
-	if (x)
+	if (x != -1)
 	{
 		g_tempBans = Trie:get_xvar_num(x);
 	}
@@ -252,7 +252,7 @@ public actionBanMenu(id, key)
 		default:
 		{
 			new banTime = g_menuSettings[id];
-			if (~get_user_flags(id) & (ADMIN_BAN | ADMIN_RCON) && (banTime <= 0 || banTime > get_pcvar_num(p_amx_tempban_maxtime)))
+			if (!(get_user_flags(id) & (ADMIN_BAN | ADMIN_RCON)) && (banTime <= 0 || banTime > get_pcvar_num(p_amx_tempban_maxtime)))
 			{
 				console_print(id, "%L", id, "NO_ACC_COM");
 				displayBanMenu(id, g_menuPosition[id]);
@@ -824,7 +824,8 @@ public actionTeamMenu(id, key)
 
 			show_activity_key("ADMIN_TRANSF_1", "ADMIN_TRANSF_2", name, name2, g_CSTeamNames[destTeamSlot]);
 
-			if (destTeamSlot == 2)
+			// Choosing a class is Counter-Strike's, as are the members read and written here.
+			if (destTeamSlot == 2 && g_cstrike)
 			{
 				if (g_fakemeta)
 				{
@@ -858,7 +859,7 @@ public actionTeamMenu(id, key)
 				{
 					user_kill(player, 1);
 				}
-				if (g_fakemeta)
+				if (g_fakemeta && g_cstrike)
 				{
 					set_ent_data(player, "CBasePlayer", "m_bTeamChanged", true);
 				}
@@ -901,7 +902,7 @@ public actionTeamMenu(id, key)
 			{
 				cs_reset_user_model(player);
 			}
-			if (g_fakemeta)
+			if (g_fakemeta && g_cstrike)
 			{
 				set_ent_data(player, "CBasePlayer", "m_bTeamChanged", true);
 			}
@@ -1120,7 +1121,11 @@ displayClcmdMenu(id, pos)
 
 	new len = formatex(menuBody, charsmax(menuBody), g_coloredMenus ? "\y%L\R%d/%d^n\w^n" : "%L %d/%d^n^n", id, "CL_CMD_MENU", pos + 1, (g_menuPlayersNum[id] / 7 + ((g_menuPlayersNum[id] % 7) ? 1 : 0)));
 	new end = start + 7;
-	new keys = MENU_KEY_0|MENU_KEY_8;
+	new keys = MENU_KEY_0;
+
+	// Key 8 cycles through the client commands; with none there is nothing to cycle.
+	if (g_menuSelectNum[id])
+		keys |= MENU_KEY_8;
 
 	if (end > g_menuPlayersNum[id])
 	{
