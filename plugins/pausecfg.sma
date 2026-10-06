@@ -270,7 +270,8 @@ pausePlugins(id)
 	{
 		get_plugin(a, filename, charsmax(filename), title, charsmax(title), status, 0, status, 0, status, charsmax(status))
 		
-		if (!isSystem(a) && status[0] == 'r' && pause("ac", filename))
+		// "running" or "debug"
+		if (!isSystem(a) && (status[0] == 'r' || status[0] == 'd') && pause("ac", filename))
 		{
 			//console_print(id, "Pausing %s (file ^"%s^")", title, filename)
 			++count
@@ -351,13 +352,10 @@ public cmdPlugin(id, level, cid)
 		read_argv(2, cmds, charsmax(cmds))
 		new file[2]
 
-		if ((g_system[g_systemNum] = findPluginByTitle(cmds, file, 0)) != -1)
-		{
-			if (g_systemNum < MAX_SYSTEM)
-				g_systemNum++
-			else
-				console_print(id, "%L", id, "CANT_MARK_MORE")
-		}
+		if (g_systemNum >= MAX_SYSTEM)
+			console_print(id, "%L", id, "CANT_MARK_MORE")
+		else if ((g_system[g_systemNum] = findPluginByTitle(cmds, file, 0)) != -1)
+			g_systemNum++
 	}
 	else if (equal(cmds, "off"))
 	{
