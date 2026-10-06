@@ -1763,6 +1763,14 @@ IGameConfigManager *MNF_GetConfigManager()
 // pointer on 32-bit, so there the handle is the pointer itself. On 64-bit it is
 // a stable 1-based index: the same pointer always gets the same handle, and
 // handles are never reused, like the raw pointers they stand for.
+//
+// Lifetime: the table names addresses, it owns nothing. Whoever owns the memory
+// frees it (fakemeta's free_tr2 returns a TraceResult to its pool, which keeps
+// the address and so the handle). A handle a hook or forward passes for the
+// game's own TraceResult names that object only while the hook runs; after it
+// returns the handle still resolves to the same address, exactly as the raw
+// pointer did, and must not be used. Entries are kept for the server's lifetime,
+// one per distinct address ever handed out.
 #if !defined(__i386__) && !defined(_M_IX86)
 static ke::Vector<void *> g_PointerHandles;
 static ke::HashMap<void *, cell, ke::PointerPolicy<void>> g_PointerHandleLookup;
