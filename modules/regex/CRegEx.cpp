@@ -574,7 +574,9 @@ int RegEx::Replace(char *text, size_t textMaxLen, const char *replace, size_t re
 									char name[32];
 									size_t nameLength = strncopy(name, walk, pch - walk + 1);
 
-									int flags, num = 0;
+									// PCRE_INFO_OPTIONS writes an unsigned long.
+									unsigned long flags;
+									int num = 0;
 									pcre_fullinfo(re, NULL, PCRE_INFO_OPTIONS, &flags);
 
 									/**
