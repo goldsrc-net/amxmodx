@@ -105,6 +105,37 @@ namespace
 		return buf;
 	}
 
+#if defined(__i386__)
+	// i386 VectorSret: copy the incoming stack args (hidden pointer, this,
+	// params) verbatim below the Hook*, call the dispatcher, then pop the
+	// hidden pointer on return like the original virtual does.
+	void *CreateSretTrampolineX86(CodeHolder& code, const HamSig::HookSignature& hs,
+	                              void *extraptr, void *callee, int *outSize)
+	{
+		uint32_t bytes = 8;	// hidden pointer + this
+		for (uint8_t i = 0; i < hs.paramCount; ++i)
+			bytes += (hs.params[i] == HamSig::ParamKind::Vector) ? 12 : 4;
+
+		x86::Assembler a(&code);
+		a.push(x86::ebp);
+		a.mov(x86::ebp, x86::esp);
+		a.and_(x86::esp, -16);
+		const uint32_t pushed = bytes + 4;	// args + Hook*
+		const uint32_t pad = (16 - (pushed % 16)) % 16;
+		if (pad)
+			a.sub(x86::esp, pad);
+		for (uint32_t off = bytes; off > 0; off -= 4)
+			a.push(x86::dword_ptr(x86::ebp, int32_t(4 + off)));
+		a.push(imm(uintptr_t(extraptr)));
+		a.call(imm(uintptr_t(callee)));
+		a.mov(x86::esp, x86::ebp);
+		a.pop(x86::ebp);
+		a.ret(4);
+
+		return Install(code, outSize);
+	}
+#endif
+
 	TypeId param_type_id(HamSig::ParamKind k)
 	{
 		using HamSig::ParamKind;
@@ -225,6 +256,13 @@ void *CreateGenericTrampoline(const HamSig::HookSignature& hs,
 	CodeHolder code;
 	if (code.init(jit_runtime().environment(), jit_runtime().cpu_features()) != kErrorOk)
 		return nullptr;
+
+#if defined(__i386__)
+	// i386 struct returns: the callee pops the hidden pointer (ret 4), which
+	// a cdecl FuncSignature cannot describe.
+	if (hs.ret == HamSig::ReturnKind::VectorSret)
+		return CreateSretTrampolineX86(code, hs, extraptr, callee, outSize);
+#endif
 
 	NativeCompiler cc(&code);
 
