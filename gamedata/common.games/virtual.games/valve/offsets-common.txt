@@ -13,6 +13,13 @@
 {
     "#default" // Build 10210
     {
+        // Only read by 64-bit builds of Ham Sandwich, where the valve library is the
+        // halflife-updated hl.so: its trivially copyable Vector comes back in registers.
+        "Keys"
+        {
+            "vector_return"  "registers"
+        }
+
         "Offsets"
         {
             "pev"
