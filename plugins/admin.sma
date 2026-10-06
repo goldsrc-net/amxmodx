@@ -192,12 +192,13 @@ public addadminfn(id, level, cid)
 			} else {
 				chars++
 			}
-			
-			if (dots != 3 || !chars || chars > 3)
-			{
-				idtype |= ADMIN_LOOKUP
-				player = find_player("dh", arg)
-			}
+		}
+
+		// Not a dotted quad: look the address up among the players.
+		if (dots != 3 || !chars || chars > 3)
+		{
+			idtype |= ADMIN_LOOKUP
+			player = find_player("dh", arg)
 		}
 	}
 	
