@@ -116,10 +116,10 @@ public:
 		return true;
 	}
 
-	bool ReadINI_RawLine(const char *line, unsigned int *curtok)
+	bool ReadINI_RawLine(const char *line, unsigned int lineno, unsigned int *curtok)
 	{
 		if (raw_line != -1)
-			return executeForwards(raw_line, handle, line, *curtok, data) > 0 ? true : false;
+			return executeForwards(raw_line, handle, line, lineno, *curtok, data) > 0 ? true : false;
 
 		return true;
 	}

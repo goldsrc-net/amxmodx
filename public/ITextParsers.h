@@ -150,11 +150,12 @@
 		 * @brief Called after a line has been preprocessed, if it has text.
 		 *
 		 * @param line			Contents of line.
+		 * @param lineno		Line number in the file, starting at 1.
 		 * @param curtok		Pointer to optionally store failed position in string.
 		 *
 		 * @return				True to keep parsing, false otherwise.
 		 */
-		virtual bool ReadINI_RawLine(const char *line, unsigned int *curtok)
+		virtual bool ReadINI_RawLine(const char *line, unsigned int lineno, unsigned int *curtok)
 		{
 			return true;
 		}

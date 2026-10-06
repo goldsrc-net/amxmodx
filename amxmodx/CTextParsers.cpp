@@ -920,7 +920,7 @@ bool TextParsers::ParseFile_INI(const char *file, ITextListener_INI *ini_listene
 			continue;
 		}
 
-		if (!ini_listener->ReadINI_RawLine(ptr, &curtok))
+		if (!ini_listener->ReadINI_RawLine(ptr, curline, &curtok))
 		{
 			goto event_failed;
 		}
