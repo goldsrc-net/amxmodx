@@ -725,14 +725,14 @@
 
             "ts_onfreeentprivatedata"
             {
-                "windows"  "10"
-                "linux"    "12"
+                "windows"  "14"
+                "linux"    "16"
             }
 
             "ts_shouldcollide"
             {
-                "windows"  "11"
-                "linux"    "13"
+                "windows"  "15"
+                "linux"    "17"
             }
 
             "ts_weapon_alternateattack"
