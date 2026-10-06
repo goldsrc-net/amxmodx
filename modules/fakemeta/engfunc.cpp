@@ -404,7 +404,7 @@ static cell AMX_NATIVE_CALL engfunc(AMX *amx, cell *params)
 			if (*ptr == 0)
 				tr = &g_tr_2;
 			else
-				tr = reinterpret_cast<TraceResult *>(*ptr);
+				tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(*ptr));
 		} else {
 			tr = &g_tr;
 		}
@@ -425,7 +425,7 @@ static cell AMX_NATIVE_CALL engfunc(AMX *amx, cell *params)
 			if (*ptr == 0)
 				tr = &g_tr_2;
 			else
-				tr = reinterpret_cast<TraceResult *>(*ptr);
+				tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(*ptr));
 		} else {
 			tr = &g_tr;
 		}
@@ -456,7 +456,7 @@ static cell AMX_NATIVE_CALL engfunc(AMX *amx, cell *params)
 			if (*ptr == 0)
 				tr = &g_tr_2;
 			else
-				tr = reinterpret_cast<TraceResult *>(*ptr);
+				tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(*ptr));
 		} else {
 			tr = &g_tr;
 		}
@@ -486,7 +486,7 @@ static cell AMX_NATIVE_CALL engfunc(AMX *amx, cell *params)
 			if (*ptr == 0)
 				tr = &g_tr_2;
 			else
-				tr = reinterpret_cast<TraceResult *>(*ptr);
+				tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(*ptr));
 		} else {
 			tr = &g_tr;
 		}
@@ -514,7 +514,7 @@ static cell AMX_NATIVE_CALL engfunc(AMX *amx, cell *params)
 			if (*ptr == 0)
 				tr = &g_tr_2;
 			else
-				tr = reinterpret_cast<TraceResult *>(*ptr);
+				tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(*ptr));
 		} else {
 			tr = &g_tr;
 		}

@@ -130,7 +130,7 @@ void TraceLine(const float *v1, const float *v2, int fNoMonsters, edict_t *pentT
 	gfm_tr=ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceLine, (Engine[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip) , fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE(FM_TraceLine, (Engine[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip) , MF_PointerToHandle(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -139,21 +139,21 @@ void TraceLine_post(const float *v1, const float *v2, int fNoMonsters, edict_t *
 	gfm_tr=ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceLine, (EnginePost[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE_POST(FM_TraceLine, (EnginePost[FM_TraceLine].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), MF_PointerToHandle(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
 void TraceToss(edict_t* pent, edict_t* pentToIgnore, TraceResult *ptr)
 {
 	gfm_tr = ptr;
-	FM_ENG_HANDLE(FM_TraceToss, (Engine[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE(FM_TraceToss, (Engine[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), MF_PointerToHandle(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
 void TraceToss_post(edict_t* pent, edict_t* pentToIgnore, TraceResult *ptr)
 {
 	gfm_tr = ptr;
-	FM_ENG_HANDLE_POST(FM_TraceToss, (EnginePost[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE_POST(FM_TraceToss, (EnginePost[FM_TraceToss].at(i), (cell)ENTINDEX(pent), (cell)ENTINDEX(pentToIgnore), MF_PointerToHandle(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -162,7 +162,7 @@ int TraceMonsterHull(edict_t *pEdict, const float *v1, const float *v2, int fNoM
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceMonsterHull, (Engine[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE(FM_TraceMonsterHull, (Engine[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), MF_PointerToHandle(ptr)));
 	RETURN_META_VALUE(mswi(lastFmRes), (int)mlCellResult);
 }
 
@@ -172,7 +172,7 @@ int TraceMonsterHull_post(edict_t *pEdict, const float *v1, const float *v2, int
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
 	origCellRet = META_RESULT_ORIG_RET(int);
-	FM_ENG_HANDLE_POST(FM_TraceMonsterHull, (EnginePost[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE_POST(FM_TraceMonsterHull, (EnginePost[FM_TraceMonsterHull].at(i), (cell)ENTINDEX(pEdict), p_v1, p_v2, (cell)fNoMonsters, (cell)ENTINDEX(pentToSkip), MF_PointerToHandle(ptr)));
 	RETURN_META_VALUE(MRES_IGNORED, (int)mlCellResult);
 }
 
@@ -181,7 +181,7 @@ void TraceHull(const float *v1, const float *v2, int fNoMonsters, int hullNumber
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceHull, (Engine[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE(FM_TraceHull, (Engine[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), MF_PointerToHandle(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -190,7 +190,7 @@ void TraceHull_post(const float *v1, const float *v2, int fNoMonsters, int hullN
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceHull, (EnginePost[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE_POST(FM_TraceHull, (EnginePost[FM_TraceHull].at(i), p_v1, p_v2, (cell)fNoMonsters, (cell)hullNumber, (cell)ENTINDEX(pentToSkip), MF_PointerToHandle(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -199,7 +199,7 @@ void TraceModel(const float *v1, const float *v2, int hullNumber, edict_t *pent,
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceModel, (Engine[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE(FM_TraceModel, (Engine[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), MF_PointerToHandle(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -208,7 +208,7 @@ void TraceModel_post(const float *v1, const float *v2, int hullNumber, edict_t *
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceModel, (EnginePost[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE_POST(FM_TraceModel, (EnginePost[FM_TraceModel].at(i), p_v1, p_v2, (cell)hullNumber, (cell)ENTINDEX(pent), MF_PointerToHandle(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -234,7 +234,7 @@ void TraceSphere(const float *v1, const float *v2, int fNoMonsters, float radius
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE(FM_TraceSphere, (Engine[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE(FM_TraceSphere, (Engine[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), MF_PointerToHandle(ptr)));
 	RETURN_META(mswi(lastFmRes));
 }
 
@@ -243,7 +243,7 @@ void TraceSphere_post(const float *v1, const float *v2, int fNoMonsters, float r
 	gfm_tr = ptr;
 	PREPARE_VECTOR(v1);
 	PREPARE_VECTOR(v2);
-	FM_ENG_HANDLE_POST(FM_TraceSphere, (EnginePost[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), fm_ptr_to_cell(ptr)));
+	FM_ENG_HANDLE_POST(FM_TraceSphere, (EnginePost[FM_TraceSphere].at(i), p_v1, p_v2, (cell)fNoMonsters, radius, (cell)ENTINDEX(pentToSkip), MF_PointerToHandle(ptr)));
 	RETURN_META(MRES_IGNORED);
 }
 

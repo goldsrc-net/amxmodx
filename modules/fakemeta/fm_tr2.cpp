@@ -33,7 +33,7 @@ static cell AMX_NATIVE_CALL set_tr2(AMX *amx, cell *params)
 	if (params[1] == 0)
 		tr = &g_tr_2;
 	else
-		tr = fm_cell_to_ptr<TraceResult>(params[1]);
+		tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(params[1]));
 
 	if (*params / sizeof(cell) < 3)
 	{
@@ -117,7 +117,7 @@ static cell AMX_NATIVE_CALL get_tr2(AMX *amx, cell *params)
 	if (params[1] == 0)
 		tr = &g_tr_2;
 	else
-		tr = fm_cell_to_ptr<TraceResult>(params[1]);
+		tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(params[1]));
 
 	cell *ptr;
 
@@ -1224,12 +1224,12 @@ static cell AMX_NATIVE_CALL create_tr2(AMX *amx, cell *params)
 		g_FreeTRs.pop();
 	}
 	memset(static_cast<void *>(tr), 0, sizeof(TraceResult));
-	return fm_ptr_to_cell(tr);
+	return MF_PointerToHandle(tr);
 }
 
 static cell AMX_NATIVE_CALL free_tr2(AMX *amx, cell *params)
 {
-	TraceResult *tr = fm_cell_to_ptr<TraceResult>(params[1]);
+	TraceResult *tr = reinterpret_cast<TraceResult *>(MF_HandleToPointer(params[1]));
 	if (!tr)
 	{
 		return 0;

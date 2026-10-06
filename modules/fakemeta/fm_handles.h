@@ -5,9 +5,13 @@
 // Shared cell↔native-pointer handle table for fakemeta. Required on
 // 64-bit hosts where PAWN_CELL_SIZE=32 cannot hold a native pointer
 // directly. Used wherever fakemeta exposes a native pointer to a
-// plugin as a cell — engine forward args (TraceResult*, clientdata_s*,
+// plugin as a cell — engine forward args (clientdata_s*,
 // entity_state_s*, usercmd_s*, char* infobuffer, set_t* pSet, etc.),
-// plus explicit allocations like create_tr2 / create_kvd.
+// plus explicit allocations like create_kvd.
+//
+// TraceResult handles cross modules (Ham hooks and ExecuteHam take
+// them too), so they use the core's MF_PointerToHandle /
+// MF_HandleToPointer instead of this table.
 //
 // Single global table; every fakemeta-exposed pointer round-trips
 // through it. find_or_alloc gives a stable handle for the same
