@@ -80,6 +80,10 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = name
+VARIABLE = variable
+STATUS = status
+TOTAL_NUM = Total %d
 
 [de]
 NO_OPTION = Finde keine Optionen mit dieser Variable (Name "%s")
@@ -163,6 +167,9 @@ ST_LAST_MAN_SOUND = Letzter Mann Sound
 ST_LAST_MAN_HEALTH = Letzter Mann HP
 ST_HE_KILL_SOUND = Granatenkill Sound
 ST_HE_SUICIDE_SOUND = Granatenselbstmord Sound
+NAME = Name
+STATUS = Status
+TOTAL_NUM = Total %d
 
 [sr]
 NO_OPTION = Nepostoji optcija(e) sa tom promenljivom (ime "%s")
@@ -246,6 +253,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = ime
+STATUS = status
+TOTAL_NUM = Ukupno %d
 
 [tr]
 NO_OPTION = O deger sahip ayar bulunamadi (isim "%s")
@@ -329,6 +339,9 @@ ST_LAST_MAN_SOUND = Son Adam Sesi
 ST_LAST_MAN_HEALTH = Son Adam Sagligi
 ST_HE_KILL_SOUND = El Bombasi Kill Sesi
 ST_HE_SUICIDE_SOUND = El Bombasi Intihar Sesi
+NAME = isim
+STATUS = statu
+TOTAL_NUM = Toplam %d
 
 [fr]
 NO_OPTION = Option(s) introuvable(s) avec cette variable (nom ^"%s^")
@@ -412,6 +425,9 @@ ST_LAST_MAN_SOUND = Son Dernier en Vie
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Son Frag a la Grenade
 ST_HE_SUICIDE_SOUND = Son Suicide a la Grenade
+NAME = nom
+STATUS = status
+TOTAL_NUM = Total %d
 
 [sv]
 NO_OPTION = Kunde inte hitta val(en) med en dylik variabel (namn "%s")
@@ -495,6 +511,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = namn
+STATUS = status
+TOTAL_NUM = Totalt %d
 
 [da]
 NO_OPTION = Kunne ikke finde mulighed(er)med en saadan variabel (name "%s")
@@ -578,6 +597,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = navn
+STATUS = status
+TOTAL_NUM = Total %d
 
 [pl]
 NO_OPTION = Nie mozna znalesc opcji z podana zmienna (nazwa "%s")
@@ -661,6 +683,9 @@ ST_LAST_MAN_SOUND = Ostatni gracz - dzwiek
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Zabicie granatem - dzwiek
 ST_HE_SUICIDE_SOUND = Samobojstwo granatem - dzwiek
+NAME = nazwa
+STATUS = status
+TOTAL_NUM = Lacznie %d
 
 [nl]
 NO_OPTION = Kon opties met zo'n variabele niet vinden (naam "%s")
@@ -744,6 +769,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = naam
+STATUS = status
+TOTAL_NUM = Totaal %d
 
 [es]
 NO_OPTION = No se encontraron opcion(es) con dicha variable (nombre "%s")
@@ -827,6 +855,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = nombre
+STATUS = estado
+TOTAL_NUM = Total %d
 
 [bp]
 NO_OPTION = Nao pode achar opcao(oes) com tal(is) variavel(is) (nome "%s")
@@ -910,6 +941,9 @@ ST_LAST_MAN_SOUND = Som de Ultimo Homem
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Som de Frag de Granada
 ST_HE_SUICIDE_SOUND = Som de Suicidio de Granada
+NAME = nome
+STATUS = estado
+TOTAL_NUM = Total de %d
 
 [cz]
 NO_OPTION = Nemuzu najit volbu s takovou promennou (jmeno "%s")
@@ -993,6 +1027,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = jmeno
+STATUS = status
+TOTAL_NUM = Celkem %d
 
 [fi]
 NO_OPTION = Ei loydetty asetuksia tuolla muuttujan nimella (nimi "%s")
@@ -1076,6 +1113,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = nimi
+STATUS = tila
+TOTAL_NUM = Kaikkiaan %d
 
 [bg]
 NO_OPTION = Ne e namerena opciq s takava promenliva (ime "%s")
@@ -1159,6 +1199,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = ime
+STATUS = sustoqnie
+TOTAL_NUM = Obshto %d
 
 [ro]
 NO_OPTION = Couldn't find option(s) with such variable (name "%s")
@@ -1242,6 +1285,9 @@ ST_LAST_MAN_SOUND = Sunet ultimul în viață
 ST_LAST_MAN_HEALTH = HP-ul ultimului în viață
 ST_HE_KILL_SOUND = Sunet Grenade Kill
 ST_HE_SUICIDE_SOUND = Sunet Sinucidere Grenadă
+NAME = nume
+STATUS = status
+TOTAL_NUM = Total %d
 
 [hu]
 NO_OPTION = Nem található opció a megadott névvel (név "%s") 
@@ -1325,6 +1371,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = Név
+STATUS = Státusz
+TOTAL_NUM = Összesen %d
 
 [lt]
 NO_OPTION = Negali surasti tokios optijos su tokiu kintamuoju (vardas "%s")
@@ -1408,6 +1457,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = vardas
+STATUS = statusas
+TOTAL_NUM = Isviso %d
 
 [sk]
 NO_OPTION = Nemozem najst volbu s takouto premennou (meno "%s")
@@ -1491,6 +1543,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = meno
+STATUS = status
+TOTAL_NUM = Celkom %d
 
 [mk]
 NO_OPTION = Ne postoi opcija so takva vrednost (ime "%s")
@@ -1574,6 +1629,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = ime
+STATUS = status
+TOTAL_NUM = Vkupno %d
 
 [hr]
 NO_OPTION = Nepostoji opcija(e) sa tom promjenljivom (ime "%s")
@@ -1657,6 +1715,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = ime
+STATUS = stanje
+TOTAL_NUM = Ukupno %d
 
 [bs]
 NO_OPTION = Nepostoji opcija(e) sa tom promijenjivom (ime "%s")
@@ -1740,6 +1801,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = ime
+STATUS = status
+TOTAL_NUM = Ukupno %d
 
 [ru]
 NO_OPTION = Не найдено значение переменной (Имя "%s")
@@ -1823,6 +1887,9 @@ ST_LAST_MAN_SOUND = Last Man Sound
 ST_LAST_MAN_HEALTH = Last Man Health
 ST_HE_KILL_SOUND = Grenade Kill Sound
 ST_HE_SUICIDE_SOUND = Grenade Suicide Sound
+NAME = Наименование
+STATUS = Состояние
+TOTAL_NUM = Всего %d
 
 [cn]
 NO_OPTION = 找不到这样的变量的选项(名称为 "%s")
@@ -1905,6 +1972,9 @@ ST_BOMB_CD_HUD = 显示回合计数 Hud信息
 ST_LAST_MAN_SOUND = 最后一位玩家时的音效
 ST_HE_KILL_SOUND = 高爆手雷击杀音效
 ST_HE_SUICIDE_SOUND = 高爆手雷自杀音效
+NAME = 名字
+STATUS = 状态
+TOTAL_NUM = 总共 %d
 
 [al]
 NO_OPTION = Nuk u gjetë mundësia me një ndryshore të tillë (emri "%s")
@@ -1988,6 +2058,9 @@ ST_LAST_MAN_SOUND = Zëri Lojtarit Fundit
 ST_LAST_MAN_HEALTH = Shëndeti Lojtarit Fundit
 ST_HE_KILL_SOUND = Zëri Vrasjes Granatë
 ST_HE_SUICIDE_SOUND = Zëri Vetëvrasjes Granatë
+NAME = emri
+STATUS = statusi
+TOTAL_NUM = Totali %d
 
 [pt]
 NO_OPTION = Não foi possível encontrar a(s) opção(ões) com essa variável (nome "%s")
@@ -2071,3 +2144,6 @@ ST_LAST_MAN_SOUND = Som do Último Jogador Vivo
 ST_LAST_MAN_HEALTH = Vida do Último Jogador Vivo
 ST_HE_KILL_SOUND = Som de Morte com Granada
 ST_HE_SUICIDE_SOUND = Som do Suicídio com Granada
+NAME = nome
+STATUS = estado
+TOTAL_NUM = Total %d
