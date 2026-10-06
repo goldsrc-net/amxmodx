@@ -89,12 +89,13 @@ public cmdSayChat(id, level)
 		return PLUGIN_CONTINUE
 	}
 	
-	new message[192], a = 0
+	new message[192], a = 0, bool:colorCode = true
 	read_args(message, charsmax(message))
 	remove_quotes(message)
 	
 	switch (said[i])
 	{
+		case 'w': a = 0
 		case 'r': a = 1
 		case 'g': a = 2
 		case 'b': a = 3
@@ -102,10 +103,11 @@ public cmdSayChat(id, level)
 		case 'm': a = 5
 		case 'c': a = 6
 		case 'o': a = 7
+		default: colorCode = false
 	}
 	
 	new n, s = i
-	if (a)
+	if (colorCode)
 	{
 		n++
 		s++
