@@ -778,7 +778,7 @@ int Handler::HandleNative(const char *native, int index, int trap)
 
 int Handler::HandleError(const char *msg)
 {
-	if (m_iErrFunc <= 0)
+	if (m_iErrFunc < 0)
 		return 0;
 
 	m_Handling = true;
