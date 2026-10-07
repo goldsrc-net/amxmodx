@@ -1052,3 +1052,24 @@ public test_is_string_category()
 
 	bench_pass();
 }
+
+// The cell before a destination buffer, laid out just below it in the data section.
+new ZeroLengthGuard = 0xC3;
+new ZeroLengthBuffer[4] = { 'x', ... };
+
+public test_zero_length_copy_leaves_previous_cell()
+{
+	/**
+	 * A copy with a maximum length of 0 writes an empty string. The cell before the buffer looks like
+	 * the lead byte of an unfinished UTF-8 character; it must not be read as part of the copy.
+	 */
+	new Trie:trie = TrieCreate();
+	TrieSetString(trie, "key", "value");
+	TrieGetString(trie, "key", ZeroLengthBuffer, 0);
+	TrieDestroy(trie);
+
+	ASSERT_EQ(ZeroLengthGuard, 0xC3);
+	ASSERT_EQ(ZeroLengthBuffer[0], 0);
+	ASSERT_EQ(ZeroLengthBuffer[1], 'x');
+	bench_pass();
+}
