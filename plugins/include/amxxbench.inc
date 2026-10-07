@@ -44,6 +44,17 @@ native bool:bench_check(bool:condition, const what[]);
 // test_menu_opens is reported as "menu opens".
 native bench_describe(const fmt[], any:...);
 
+// A run time error whose description contains text is part of the running test: it does not fail
+// the test, and the test fails if no such error comes before it ends. For code that must fail.
+native bench_expect_error(const text[]);
+
+// Lets the running test take up to seconds game seconds from its start (default bench_timeout).
+native bench_set_timeout(Float:seconds);
+
+// The server's local time reads hour:minute (seconds keep running) until the test ends, for code
+// that depends on the time of day (get_time, format_time). Done through TZ; UTC is unchanged.
+native bench_set_local_time(hour, minute);
+
 // Calls step(data) in this plugin after delay game seconds (0.0 = next frame).
 native bench_next(const step[], Float:delay = 0.0, data = 0);
 
@@ -81,8 +92,11 @@ stock bench_puppet_say(id, const text[], bool:team = false)
 // Messages. Every user message sent to a puppet during the current test is recorded with its
 // arguments, along with messages sent to all players. A BenchMsg: handle names one of them; 0 is
 // none. name filters by message name ("SayText", "TextMsg", "ShowMenu", ...), text by a substring
-// of any string argument. Both are optional. Text the engine prints to a puppet (engclient_print,
-// console_print) is recorded too, under the names "console", "center" and "chat".
+// of any string argument. Both are optional. Text the engine prints to a puppet (engclient_print)
+// is recorded too, under the names "console", "center" and "chat" (console_print and client_print
+// reach a player as TextMsg messages), commands stuffed into its console (client_cmd) as
+// "stufftext", and every line the server console shows during the test as "server" for id 0:
+// ASSERT_MSG(0, "server", "Loaded 1 admin").
 
 // Whether this engine supports capture (ReHLDS 3.15+, or the stock HLDS engine).
 native bool:bench_msg_available();
