@@ -271,8 +271,13 @@ void RankSystem::loadRank(const char* filename)
 		return;
 	}
 	
-	if (i == RANK_VERSION)
+	// Version 5 files were written kills, deaths, hs, tks, damage, hits, shots, while this has always
+	// read them tks, damage, deaths, kills, shots, hits, hs, so each load moved the totals between
+	// fields. Version 6 is written in the order read here (as CSX and DODX do); a version 5 file is
+	// read in the order it was written.
+	if (i == RANK_VERSION || i == RANK_VERSION_OLDORDER)
 	{
+		bool oldOrder = (i == RANK_VERSION_OLDORDER);
 		Stats d;
 		char unique[64], name[64];
 		if (fread(&i, sizeof(short int), 1, bfp) != 1)
@@ -286,13 +291,26 @@ void RankSystem::loadRank(const char* filename)
 			TRYREAD(name, i, sizeof(char), bfp);
 			TRYREAD(&i, 1, sizeof(short int), bfp);
 			TRYREAD(unique, i, sizeof(char), bfp);
-			TRYREAD(&d.tks, 1, sizeof(int), bfp);
-			TRYREAD(&d.damage, 1, sizeof(int), bfp);
-			TRYREAD(&d.deaths, 1, sizeof(int), bfp);
-			TRYREAD(&d.kills, 1, sizeof(int), bfp);
-			TRYREAD(&d.shots, 1, sizeof(int), bfp);
-			TRYREAD(&d.hits, 1, sizeof(int), bfp);
-			TRYREAD(&d.hs, 1, sizeof(int), bfp);
+			if (oldOrder)
+			{
+				TRYREAD(&d.kills, 1, sizeof(int), bfp);
+				TRYREAD(&d.deaths, 1, sizeof(int), bfp);
+				TRYREAD(&d.hs, 1, sizeof(int), bfp);
+				TRYREAD(&d.tks, 1, sizeof(int), bfp);
+				TRYREAD(&d.damage, 1, sizeof(int), bfp);
+				TRYREAD(&d.hits, 1, sizeof(int), bfp);
+				TRYREAD(&d.shots, 1, sizeof(int), bfp);
+			}
+			else
+			{
+				TRYREAD(&d.tks, 1, sizeof(int), bfp);
+				TRYREAD(&d.damage, 1, sizeof(int), bfp);
+				TRYREAD(&d.deaths, 1, sizeof(int), bfp);
+				TRYREAD(&d.kills, 1, sizeof(int), bfp);
+				TRYREAD(&d.shots, 1, sizeof(int), bfp);
+				TRYREAD(&d.hits, 1, sizeof(int), bfp);
+				TRYREAD(&d.hs, 1, sizeof(int), bfp);
+			}
 			TRYREAD(d.bodyHits, 1, sizeof(d.bodyHits), bfp);
 			TRYREAD(&i, 1, sizeof(short int), bfp);
 
@@ -324,13 +342,13 @@ void RankSystem::saveRank( const char* filename )
 			fwrite( (*a).name , (*a).namelen , sizeof(char) , bfp);
 			fwrite( &(*a).uniquelen , 1, sizeof(short int), bfp);
 			fwrite( (*a).unique ,  (*a).uniquelen , sizeof(char) , bfp);
-			fwrite( &(*a).kills, 1, sizeof(int), bfp);
-			fwrite( &(*a).deaths, 1, sizeof(int), bfp);
-			fwrite( &(*a).hs, 1, sizeof(int), bfp);
 			fwrite( &(*a).tks, 1, sizeof(int), bfp);
 			fwrite( &(*a).damage, 1, sizeof(int), bfp);
-			fwrite( &(*a).hits, 1, sizeof(int), bfp);
+			fwrite( &(*a).deaths, 1, sizeof(int), bfp);
+			fwrite( &(*a).kills, 1, sizeof(int), bfp);
 			fwrite( &(*a).shots, 1, sizeof(int), bfp);
+			fwrite( &(*a).hits, 1, sizeof(int), bfp);
+			fwrite( &(*a).hs, 1, sizeof(int), bfp);
 			fwrite( (*a).bodyHits, 1, sizeof((*a).bodyHits), bfp);
 		}
 		

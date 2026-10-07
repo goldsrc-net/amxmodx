@@ -15,7 +15,8 @@
 #ifndef CRANK_H
 #define CRANK_H
 
-#define RANK_VERSION 5
+#define RANK_VERSION 6
+#define RANK_VERSION_OLDORDER 5 // the same fields, written in another order (CRank.cpp loadRank)
 
 
 // *****************************************************

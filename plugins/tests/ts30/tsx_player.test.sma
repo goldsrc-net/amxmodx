@@ -32,7 +32,8 @@
 new g_Other
 new Float:g_Start[3]
 new Float:g_SpeedEnd
-new g_Turns
+new Float:g_Yaw
+new Float:g_Room
 new Float:g_Distance
 new g_Thrown[4]
 new Float:g_Normal[4]
@@ -349,7 +350,10 @@ public test_superjump_and_kung_fu_powerups()
 	bench_puppet_spawn(id, "jumper_spawned", 20.0, "respawn")
 }
 
-// A powerup dropped where the player stands; he picks it up once it lands.
+// A powerup dropped on the player; he picks it up once it lands. It starts 48 units over his
+// origin: one put at his origin starts inside his hitboxes and never lands. Dropped there while he
+// still falls from the spawn point, it lands on him only from a spot high enough over the floor
+// (ts_lobby's 784 0 112 is not), so he settles first.
 DropPowerup(id, const type[])
 {
 	new ent = CreatePowerup(type)
@@ -357,6 +361,7 @@ DropPowerup(id, const type[])
 	{
 		new Float:origin[3]
 		pev(id, pev_origin, origin)
+		origin[2] += 48.0
 		engfunc(EngFunc_SetOrigin, ent, origin)
 	}
 	return ent
@@ -364,19 +369,31 @@ DropPowerup(id, const type[])
 
 public jumper_spawned(id)
 {
+	bench_wait_until("on_ground", "jumper_settled", 2.0, id)
+}
+
+public bool:on_ground(id)
+{
+	return (pev(id, pev_flags) & FL_ONGROUND) != 0
+}
+
+public jumper_settled(id)
+{
 	ASSERT_EQ(ts_has_superjump(id), 0)
 	ASSERT_EQ(ts_has_fupowerup(id), 0)
 	ASSERT(DropPowerup(id, "256") > 0)
 	ASSERT(DropPowerup(id, "4") > 0)
-	bench_next("jumper_took", 4.0, id)
+	bench_wait_until("jumper_has_both", "jumper_took", 4.0, id)
+}
+
+public bool:jumper_has_both(id)
+{
+	// The game sets them as he touches each and tells him (PwUp).
+	return ts_has_superjump(id) == 1 && ts_has_fupowerup(id) == 1 && bench_msg_count(id, "PwUp") >= 2
 }
 
 public jumper_took(id)
 {
-	// The game told him he picked up both (PwUp).
-	ASSERT(bench_msg_count(id, "PwUp") >= 2)
-	ASSERT_EQ(ts_has_superjump(id), 1)
-	ASSERT_EQ(ts_has_fupowerup(id), 1)
 	bench_pass()
 }
 
@@ -389,7 +406,7 @@ public test_createpwup_puts_a_powerup_a_player_picks_up()
 
 public collector_spawned(id)
 {
-	bench_next("collector_settled", 0.5, id)
+	bench_wait_until("on_ground", "collector_settled", 2.0, id)
 }
 
 public collector_settled(id)
@@ -417,13 +434,12 @@ public collector_settled(id)
 
 public bool:collector_has_it(id)
 {
-	return ts_has_superjump(id) == 1
+	// He has it, and the game told him he picked it up (PwUp).
+	return ts_has_superjump(id) == 1 && bench_msg_count(id, "PwUp") >= 1
 }
 
 public collector_took(id)
 {
-	// The game told him he picked it up.
-	ASSERT(bench_msg_count(id, "PwUp") >= 1)
 	bench_pass()
 }
 
@@ -437,7 +453,12 @@ public test_createpwup_with_the_type_alone()
 {
 	new id = bench_puppet("giftee")
 	ASSERT(id > 0)
-	bench_puppet_spawn(id, "giftee_spawned", 20.0, "respawn")
+	bench_puppet_spawn(id, "giftee_landed", 20.0, "respawn")
+}
+
+public giftee_landed(id)
+{
+	bench_wait_until("on_ground", "giftee_spawned", 2.0, id)
 }
 
 public giftee_spawned(id)
@@ -559,23 +580,55 @@ public speed_spawned(id)
 	bench_next("speed_settled", 1.0, id)
 }
 
+// How far a player could walk from start along yaw before something stops him, up to 1000 units.
+Float:Room(const Float:start[3], Float:yaw, ignore)
+{
+	new Float:angles[3], Float:dir[3], Float:end[3], Float:fraction
+	angles[1] = yaw
+	angle_vector(angles, ANGLEVECTOR_FORWARD, dir)
+	xs_vec_mul_scalar(dir, 1000.0, dir)
+	xs_vec_add(start, dir, end)
+	engfunc(EngFunc_TraceHull, start, end, IGNORE_MONSTERS, HULL_HUMAN, ignore, 0)
+	get_tr2(0, TR_flFraction, fraction)
+	return fraction * 1000.0
+}
+
+// Where the bystander stands out of the aura: at the far end of the runner's open ground, where he
+// stays (he would fall back from a spot in the air) and the runner never comes near him.
+OutOfTheAura(Float:spot[3])
+{
+	new Float:angles[3], Float:dir[3]
+	angles[1] = g_Yaw
+	angle_vector(angles, ANGLEVECTOR_FORWARD, dir)
+	xs_vec_mul_scalar(dir, g_Room - 16.0, dir)
+	xs_vec_add(g_Start, dir, spot)
+}
+
 public speed_settled(id)
 {
 	pev(id, pev_origin, g_Start)
-	// The bystander waits out of the way, 200 units up.
-	new Float:far[3]
-	far = g_Start
-	far[2] += 200.0
-	engfunc(EngFunc_SetOrigin, g_Other, far)
-	g_Turns = 0
-	speed_run(id)
-}
+	// He runs the way with the most open ground, so nothing cuts either run short.
+	g_Room = 0.0
+	for (new i = 0; i < 8; i++)
+	{
+		new Float:room = Room(g_Start, 45.0 * i, id)
+		if (room > g_Room)
+		{
+			g_Room = room
+			g_Yaw = 45.0 * i
+		}
+	}
+	new what[64]
+	formatex(what, charsmax(what), "%.0f units of open ground", g_Room)
+	ASSERT(bench_check(g_Room >= 300.0, what))
 
-// How far he runs in half a second at the normal rate, turning until he faces open ground.
-public speed_run(id)
-{
+	new Float:far[3]
+	OutOfTheAura(far)
+	engfunc(EngFunc_SetOrigin, g_Other, far)
+
+	// How far he runs in half a second at the normal rate.
 	new Float:angles[3]
-	angles[1] = 90.0 * g_Turns
+	angles[1] = g_Yaw
 	bench_puppet_angles(id, angles)
 	bench_puppet_input(id, 0, 400.0)
 	bench_next("speed_ran", 0.5, id)
@@ -589,11 +642,6 @@ public speed_ran(id)
 	g_Distance = get_distance_f(origin, g_Start)
 	engfunc(EngFunc_SetOrigin, id, g_Start)
 	set_pev(id, pev_velocity, Float:{0.0, 0.0, 0.0})
-	if (g_Distance < 50.0 && ++g_Turns < 4)
-	{
-		bench_next("speed_run", 0.3, id)
-		return
-	}
 	new what[64]
 	formatex(what, charsmax(what), "ran %.1f at the normal rate", g_Distance)
 	ASSERT(bench_check(g_Distance >= 50.0, what))
@@ -621,11 +669,10 @@ public speed_slowed(id)
 
 	// Out of the aura, the bystander goes back to normal; the runner runs half as far.
 	new Float:far[3]
-	far = g_Start
-	far[2] += 200.0
+	OutOfTheAura(far)
 	engfunc(EngFunc_SetOrigin, g_Other, far)
 	new Float:angles[3]
-	angles[1] = 90.0 * g_Turns
+	angles[1] = g_Yaw
 	bench_puppet_angles(id, angles)
 	bench_puppet_input(id, 0, 400.0)
 	bench_next("speed_ran_slow", 0.5, id)
@@ -641,14 +688,30 @@ public speed_ran_slow(id)
 	formatex(what, charsmax(what), "ran %.1f slowed, %.1f at the normal rate", distance, g_Distance)
 	ASSERT(bench_check(distance > g_Distance * 0.3 && distance < g_Distance * 0.7, what))
 	ASSERT_NEAR(SlowTarget(g_Other), 1.0)
-	bench_next("speed_worn_off", 2.5, id)
+	bench_wait_until("speed_ended", "speed_worn_off", 3.0, id)
+}
+
+public bool:speed_ended(id)
+{
+	return ts_is_in_slowmo(id) == 0
 }
 
 public speed_worn_off(id)
 {
-	ASSERT_NEAR(SlowFactor(id), 1.0)
-	ASSERT_NEAR(SlowFactor(g_Other), 1.0)
-	ASSERT_EQ(ts_is_in_slowmo(id), 0)
+	// Once the time runs out both go back to the normal rate, and the game eases them there.
+	ASSERT(get_gametime() >= g_SpeedEnd)
+	ASSERT_NEAR(SlowTarget(id), 1.0)
+	ASSERT_NEAR(SlowTarget(g_Other), 1.0)
+	bench_wait_until("speed_eased", "speed_normal", 2.0, id)
+}
+
+public bool:speed_eased(id)
+{
+	return Near(SlowFactor(id), 1.0) && Near(SlowFactor(g_Other), 1.0)
+}
+
+public speed_normal(id)
+{
 	bench_pass()
 }
 
@@ -755,7 +818,7 @@ LookUp(id)
 }
 
 // In the air at the normal rate: its gravity, then half speed for a second around the thrower.
-// Out of the aura it is left alone; in it, it slows at its next think.
+// Out of the aura it is left alone; in it, it slows at its next think (every 0.1 s).
 SlowInFlight(id, ent)
 {
 	g_Thrown[0] = ent
@@ -768,16 +831,24 @@ SlowInFlight(id, ent)
 	ASSERT_NEAR(Fuser1(ent), 1.0)
 	ASSERT_EQ(ts_set_speed(id, 0.5, 2000.0, 1.0), 1)
 	ASSERT_NEAR(Fuser1(ent), 0.5)
-	bench_next("thrown_slowed", 0.15, id)
+	bench_wait_until("thrown_physics_slowed", "thrown_slowed", 0.5, id)
+}
+
+public bool:thrown_physics_slowed(id)
+{
+	new ent = g_Thrown[0]
+	return pev_valid(ent) && Near(Gravity(ent), g_Normal[0] * 0.25)
 }
 
 public thrown_slowed(id)
 {
-	new ent = g_Thrown[0]
-	ASSERT(pev_valid(ent))
-	ASSERT_NEAR(Fuser1(ent), 0.5)
-	ASSERT_NEAR(Gravity(ent), g_Normal[0] * 0.25)
-	bench_next("thrown_worn_off", 1.2, id)
+	ASSERT_NEAR(Fuser1(g_Thrown[0]), 0.5)
+	bench_wait_until("thrown_speed_over", "thrown_worn_off", 2.0, id)
+}
+
+public bool:thrown_speed_over(id)
+{
+	return ts_is_in_slowmo(id) == 0
 }
 
 public thrown_worn_off(id)
@@ -785,7 +856,6 @@ public thrown_worn_off(id)
 	new ent = g_Thrown[0]
 	if (pev_valid(ent))
 		ASSERT_NEAR(Fuser1(ent), 1.0)
-	ASSERT_EQ(ts_is_in_slowmo(id), 0)
 	bench_pass()
 }
 
@@ -847,7 +917,17 @@ public bool:knife_thrown(id)
 public knife_flying(id)
 {
 	bench_puppet_input(id, 0)
-	SlowInFlight(id, FindClass("knife"))
+	// A thrown knife flies at 1785 units a second and sticks in the first wall it meets, which on
+	// some spawn points comes before its next think; it is slowed down to stay in the air a while.
+	new ent = FindClass("knife")
+	new Float:velocity[3]
+	pev(ent, pev_velocity, velocity)
+	velocity[2] = 0.0
+	xs_vec_normalize(velocity, velocity)
+	xs_vec_mul_scalar(velocity, 150.0, velocity)
+	velocity[2] = 100.0
+	set_pev(ent, pev_velocity, velocity)
+	SlowInFlight(id, ent)
 }
 
 public test_set_speed_slows_a_grenade()

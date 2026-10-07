@@ -197,6 +197,63 @@ public gun_out(id)
 	bench_pass()
 }
 
+// A player who joins in the slot of one who left holds kung fu until he draws something: the game
+// sends him no WeaponInfo before that, so nothing of the last player's may carry over.
+new g_Slot
+new g_WeaponInfos
+
+public test_newcomer_does_not_hold_the_last_players_gun()
+{
+	new id = bench_puppet("leaver")
+	ASSERT(id > 0)
+	g_Slot = id
+	bench_puppet_spawn(id, "leaver_spawned", 20.0, "respawn")
+}
+
+public leaver_spawned(id)
+{
+	ts_giveweapon(id, TSW_GCOLTS, 0, 0)
+	g_Weapon = TSW_GCOLTS
+	bench_wait_until("holds_weapon", "leaver_armed", 3.0, id)
+}
+
+public leaver_armed(id)
+{
+	ASSERT_EQ(ts_getuserwpn(id), TSW_GCOLTS)
+	server_cmd("kick #%d", get_user_userid(id))
+	bench_wait_until("leaver_gone", "leaver_left", 2.0, id)
+}
+
+public bool:leaver_gone(id)
+{
+	return !is_user_connected(id)
+}
+
+public leaver_left(id)
+{
+	// The messages to this slot so far, the leaver's.
+	g_WeaponInfos = bench_msg_count(id, "WeaponInfo")
+	new newcomer = bench_puppet("newcomer")
+	ASSERT_EQ(newcomer, g_Slot)
+	bench_puppet_spawn(newcomer, "newcomer_spawned", 20.0, "respawn")
+}
+
+public newcomer_spawned(id)
+{
+	bench_next("newcomer_settled", 0.5, id)
+}
+
+public newcomer_settled(id)
+{
+	// The game has told him nothing about a weapon.
+	ASSERT_EQ(bench_msg_count(id, "WeaponInfo"), g_WeaponInfos)
+	new clip, ammo, mode, extra
+	ASSERT_EQ(ts_getuserwpn(id, clip, ammo, mode, extra), TSW_KUNG_FU)
+	ASSERT_EQ(clip, 0)
+	ASSERT_EQ(ammo, 0)
+	bench_pass()
+}
+
 // --- kills -----------------------------------------------------------------------------------
 // The victim stands with 1 health; the killer is put in front of him, takes the weapon out and
 // attacks until he dies.
@@ -214,6 +271,41 @@ public test_thrown_knife_kill()
 	g_Weapon = KNIFE
 	g_Buttons = IN_ATTACK2
 	g_Distance = 100.0
+	StartDuel()
+}
+
+// A knife in hand stabs; the game scores that as a gun kill (1 point), not as kung fu.
+public test_combat_knife_kill()
+{
+	g_Weapon = TSW_CKNIFE
+	g_Buttons = IN_ATTACK
+	g_Distance = 32.0
+	StartDuel()
+}
+
+public test_seal_knife_kill()
+{
+	g_Weapon = TSW_SKNIFE
+	g_Buttons = IN_ATTACK
+	g_Distance = 32.0
+	StartDuel()
+}
+
+// The katana slashes; also a gun kill's 1 point.
+public test_katana_kill()
+{
+	g_Weapon = TSW_KATANA
+	g_Buttons = IN_ATTACK
+	g_Distance = 32.0
+	StartDuel()
+}
+
+// The Beretta 92F (TSW_UNK1) is an ordinary gun.
+public test_beretta_kill()
+{
+	g_Weapon = TSW_UNK1
+	g_Buttons = IN_ATTACK
+	g_Distance = 150.0
 	StartDuel()
 }
 
@@ -293,7 +385,8 @@ public duel_over(killer)
 public duel_counted(killer)
 {
 	new stats[STATSX_MAX_STATS], body[MAX_BODYHITS], weapon, slot, name[32], deathmsg[32]
-	switch (g_Weapon)
+	// The knife thrown (attack 2) is its own weapon.
+	switch (g_Weapon == KNIFE && g_Buttons == IN_ATTACK2 ? TSW_TKNIFE : g_Weapon)
 	{
 		case TSW_KUNG_FU:
 		{
@@ -302,19 +395,40 @@ public duel_counted(killer)
 			copy(name, charsmax(name), "Kung Fu")
 			copy(deathmsg, charsmax(deathmsg), "Kung Fu")
 		}
-		case KNIFE:
+		case TSW_TKNIFE:
 		{
 			weapon = TSW_TKNIFE
 			slot = TSW_TKNIFE
 			copy(name, charsmax(name), "Throwing Knife")
 			copy(deathmsg, charsmax(deathmsg), "Throwing Combat Knife")
 		}
+		case TSW_CKNIFE, TSW_SKNIFE, TSW_KATANA:
+		{
+			weapon = g_Weapon
+			slot = g_Weapon
+			if (g_Weapon == TSW_CKNIFE)
+				copy(name, charsmax(name), "Combat Knife")
+			else if (g_Weapon == TSW_SKNIFE)
+				copy(name, charsmax(name), "Seal Knife")
+			else
+				copy(name, charsmax(name), "Katana")
+			copy(deathmsg, charsmax(deathmsg), name)
+		}
 		default:
 		{
 			weapon = g_Weapon
 			slot = g_Weapon
-			copy(name, charsmax(name), "Contender G2")
-			copy(deathmsg, charsmax(deathmsg), "Contender G2")
+			if (g_Weapon == TSW_CONTENDER)
+			{
+				copy(name, charsmax(name), "Contender G2")
+				copy(deathmsg, charsmax(deathmsg), "Contender G2")
+			}
+			else
+			{
+				// TSX still names it after its TS 2 placeholder.
+				copy(name, charsmax(name), "Unk1")
+				copy(deathmsg, charsmax(deathmsg), "Beretta 92F")
+			}
 		}
 	}
 	// What the game itself names the weapon in its DeathMsg (a string, not an id).
@@ -330,14 +444,12 @@ public duel_counted(killer)
 	ASSERT_EQ(get_user_vstats(killer, g_Victim, stats, body, vname, charsmax(vname)), 1)
 	ASSERT_STR_EQ(vname, name)
 	ASSERT_EQ(stats[STATSX_DEATHS], 1)
-	// Per weapon. A gun's stats only show once he has shots, which TSX counts from ClipInfo, a
-	// message TS 3.0 never sends; kung fu and the knife count a shot for each hit.
-	if (g_Weapon != TSW_CONTENDER)
-	{
-		ASSERT_EQ(get_user_wstats(killer, slot, stats, body), 1)
-		ASSERT_EQ(stats[STATSX_KILLS], 1)
-		ASSERT_EQ(get_user_wstats(killer, 0, stats, body), 1)
-		ASSERT_EQ(stats[STATSX_KILLS], 1)
-	}
+	// Per weapon: kung fu and the knives count a shot for each hit, a gun each round it fires.
+	ASSERT_EQ(get_user_wstats(killer, slot, stats, body), 1)
+	ASSERT_EQ(stats[STATSX_KILLS], 1)
+	ASSERT(stats[STATSX_SHOTS] >= stats[STATSX_HITS])
+	ASSERT(stats[STATSX_HITS] >= 1)
+	ASSERT_EQ(get_user_wstats(killer, 0, stats, body), 1)
+	ASSERT_EQ(stats[STATSX_KILLS], 1)
 	bench_pass()
 }

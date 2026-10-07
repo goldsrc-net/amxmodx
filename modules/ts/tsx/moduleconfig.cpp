@@ -310,6 +310,45 @@ void TraceLine_Post(const float *v1, const float *v2, int fNoMonsters, edict_t *
 	RETURN_META(MRES_IGNORED);
 }
 
+// The Specialists 3.0 sends no ClipInfo. A gun plays one of these events for each shot (CTSGun::
+// StandardFire, AkimboFire and ShotgunFire), its weapon in iparam1; firelinked is both akimbo barrels.
+static unsigned short usFire;
+static unsigned short usFireLinked;
+static unsigned short usShotgunFire;
+
+unsigned short PrecacheEvent_Post(int type, const char *psz)
+{
+	unsigned short index = META_RESULT_ORIG_RET(unsigned short);
+	if (!strcmp(psz, "events/fire.sc"))
+		usFire = index;
+	else if (!strcmp(psz, "events/firelinked.sc"))
+		usFireLinked = index;
+	else if (!strcmp(psz, "events/pump.sc"))
+		usShotgunFire = index;
+	RETURN_META_VALUE(MRES_IGNORED, 0);
+}
+
+void PlaybackEvent_Post(int flags, const edict_t *pInvoker, unsigned short eventindex, float delay, float *origin, float *angles, float fparam1, float fparam2, int iparam1, int iparam2, int bparam1, int bparam2)
+{
+	if (!eventindex || !pInvoker || !(pInvoker->v.flags & (FL_CLIENT | FL_FAKECLIENT)) || !isModuleActive())
+		RETURN_META(MRES_IGNORED);
+
+	int shots = 0;
+	if (eventindex == usFire || eventindex == usShotgunFire)
+		shots = 1;
+	else if (eventindex == usFireLinked)
+		shots = 2;
+
+	if (shots)
+	{
+		CPlayer *pPlayer = GET_PLAYER_POINTER(pInvoker);
+		int weapon = (iparam1 > 0 && iparam1 < TSWEAPON_TKNIFE) ? iparam1 : pPlayer->current;
+		while (shots--)
+			pPlayer->saveShot(weapon);
+	}
+	RETURN_META(MRES_IGNORED);
+}
+
 void OnMetaAttach()
 {
 	

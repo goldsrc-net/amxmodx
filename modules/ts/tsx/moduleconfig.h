@@ -474,8 +474,8 @@
 // #define FN_GetPhysicsKeyValue_Post			GetPhysicsKeyValue_Post
 // #define FN_SetPhysicsKeyValue_Post			SetPhysicsKeyValue_Post
 // #define FN_GetPhysicsInfoString_Post			GetPhysicsInfoString_Post
-// #define FN_PrecacheEvent_Post				PrecacheEvent_Post
-// #define FN_PlaybackEvent_Post				PlaybackEvent_Post
+#define FN_PrecacheEvent_Post				PrecacheEvent_Post
+#define FN_PlaybackEvent_Post				PlaybackEvent_Post
 // #define FN_SetFatPVS_Post					SetFatPVS_Post
 // #define FN_SetFatPAS_Post					SetFatPAS_Post
 // #define FN_CheckVisibility_Post				CheckVisibility_Post

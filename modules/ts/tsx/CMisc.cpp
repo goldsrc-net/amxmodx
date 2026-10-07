@@ -31,6 +31,17 @@ void CPlayer::PutInServer()
 	restartStats();
 	ingame = true;
 
+	// The game tells a newcomer about his weapon, powerup and state only when they change, so what
+	// the last player in this slot had must not carry over.
+	current = TSWEAPON_KUNGFU;
+	aiming = 0;
+	money = 0;
+	space = 0;
+	PwUp = 0;
+	PwUpValue = 0;
+	killFlags = 0;
+	state = oldstate = checkstate = 0;
+
 	speedActive = false;
 	speedBy = 0;
 	speedEntityCount = 0;

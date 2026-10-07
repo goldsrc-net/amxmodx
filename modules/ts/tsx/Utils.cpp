@@ -15,10 +15,12 @@
 #include "amxxmodule.h"
 #include "tsx.h"
 
+// The last field is the points the game gives for a kill (TSGetPointsForFrag): 2 for kung fu (close
+// combat) and a thrown knife, 1 for everything else, the knives and the katana in hand included.
 weapon_t weaponData[] = { 
-	{ 1,"Kung Fu","kung_fu",3 }, // id 0 like in WeaponInfo , DeathMsg 
+	{ 1,"Kung Fu","kung_fu",2 }, // id 0 like in WeaponInfo , DeathMsg 
 	{ 0,"Glock-18","glock-18",1 },
-	{ 0,"Unk1","Unk1",0 }, // bomb ?
+	{ 0,"Unk1","Unk1",1 }, // the Beretta 92F in TS 3.0
 	{ 0,"Mini-Uzi","mini-uzi",1 }, 
 	{ 0,"BENELLI-M3","benelli_m3",1 }, 
 	{ 0,"M4A1","m4a1",1 },
@@ -45,17 +47,17 @@ weapon_t weaponData[] = {
 	{ 0,"MOSSBERG 500","mossberg_500",1 },
 	{ 0,"M16A4","m16a4",1 },
 	{ 0,"Ruger-MK1","ruger-mk1",1 },
-	{ 0,"C4","c4",0 },
+	{ 0,"C4","c4",1 }, // the Briefcase (CTF flag) in TS 3.0
 	{ 0,"Akimbo Five-seveN","akimbo_five-seven",1 },
 	{ 0,"Raging Bull","raging_bull",1 },
 	{ 0,"M60E3","m60e3",1 }, 
 	{ 0,"Sawed-off","sawed-off",1 }, // 33 
-	{ 1,"Katana", "katana",2 }, 
+	{ 1,"Katana", "katana",1 }, 
 	{ 1,"Seal Knife","seal_knife",1 }, // 35 
 	{ 0,"Contender G2","contender_g2",1 }, // 36 
 	{ 0,"Akimbo Skorpions","akimbo_skorpions",1 }, // 37 
 	{ 1,"Throwing Knife","throwing_knife",2 }, // 38, not a game id 
-	{ 1,"Kung Fu","kung_fu",3 }, // TSWEAPON_KUNGFU_STATS: kung fu's own stats, slot 0 holds every weapon's 
+	{ 1,"Kung Fu","kung_fu",2 }, // TSWEAPON_KUNGFU_STATS: kung fu's own stats, slot 0 holds every weapon's 
 };
 
 bool ignoreBots (edict_t *pEnt, edict_t *pOther){
