@@ -131,9 +131,9 @@ void MysqlThread::SetCellData(cell data[], ucell len)
 		m_data = new cell[len];
 		m_maxdatalen = len;
 	}
+	m_datalen = len;
 	if (len)
 	{
-		m_datalen = len;
 		memcpy(m_data, data, len*sizeof(cell));
 	}
 }
@@ -298,6 +298,9 @@ void MysqlThread::Execute()
 			c_diff);
 	}
 	FreeHandle(hndl);
+	/* Each SQL_ThreadQuery registers its own forward; this thread object is reused. */
+	MF_UnregisterSPForward(m_fwd);
+	m_fwd = 0;
 	delete [] m_qrInfo.amxinfo.opt_ptr;
 	m_qrInfo.amxinfo.opt_ptr = NULL;
 }
@@ -412,7 +415,7 @@ AtomicResult::~AtomicResult()
 		FreeHandle();
 	}
 
-	for (size_t i=0; i<=m_AllocSize; i++)
+	for (size_t i=0; i<m_AllocSize; i++)
 	{
 		delete m_Table[i];
 	}
@@ -430,6 +433,9 @@ unsigned int AtomicResult::RowCount()
 
 bool AtomicResult::IsNull(unsigned int columnId)
 {
+	if (columnId >= m_FieldCount)
+		return true;
+
 	return (GetString(columnId) == NULL);
 }
 
@@ -502,9 +508,8 @@ const char *AtomicResult::GetString(unsigned int columnId)
 
 	size_t idx = (m_CurRow * m_FieldCount) + columnId;
 
-	assert(m_Table[idx] != NULL);
-
-	return m_Table[idx]->chars();
+	/* NULL is kept as no string */
+	return m_Table[idx] ? m_Table[idx]->chars() : NULL;
 }
 
 IResultRow *AtomicResult::GetRow()
@@ -583,12 +588,16 @@ void AtomicResult::CopyFrom(IResultSet *rs)
 		row = rs->GetRow();
 		for (unsigned int i=0; i<m_FieldCount; i++,idx++)
 		{
-			if (m_Table[idx])
+			/* NULL is kept as no string, for IsNull */
+			const char* string = row->GetString(i);
+			if (!string)
 			{
-				*m_Table[idx] = row->GetString(i);
+				delete m_Table[idx];
+				m_Table[idx] = NULL;
+			} else if (m_Table[idx]) {
+				*m_Table[idx] = string;
 			} else {
-				const char* string = row->GetString(i);
-				m_Table[idx] = new ke::AString(string ? string : "");
+				m_Table[idx] = new ke::AString(string);
 			}
 		}
 		rs->NextRow();
