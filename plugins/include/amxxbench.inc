@@ -255,20 +255,18 @@ stock bench_puppet_look_at(id, const Float:target[3])
 // entities (doors), whose origin is 0 0 0, as well as point entities. Returns false if none.
 stock bool:bench_puppet_face(id, ent, Float:dist = 56.0)
 {
-	new Float:center[3], Float:half[3], Float:mins[3], Float:maxs[3];
+	new Float:center[3], Float:half[3], Float:mins[3], Float:maxs[3], Float:origin[3];
 	new Float:pos[3], Float:end[3], Float:eye[3], Float:ofs[3], Float:yaw, Float:reach;
-	pev(ent, pev_absmin, mins);
-	pev(ent, pev_absmax, maxs);
-	if (maxs[0] > mins[0] || maxs[1] > mins[1] || maxs[2] > mins[2])
+	// The entity's own size from its origin: absmin/absmax grow to cover every rotation once a
+	// brush (a rotating door) has turned, and stay that way.
+	pev(ent, pev_origin, origin);
+	pev(ent, pev_mins, mins);
+	pev(ent, pev_maxs, maxs);
+	for (new k = 0; k < 3; k++)
 	{
-		for (new k = 0; k < 3; k++)
-		{
-			center[k] = (mins[k] + maxs[k]) / 2.0;
-			half[k] = (maxs[k] - mins[k]) / 2.0;
-		}
+		center[k] = origin[k] + (mins[k] + maxs[k]) / 2.0;
+		half[k] = (maxs[k] - mins[k]) / 2.0;
 	}
-	else
-		pev(ent, pev_origin, center);
 	pev(id, pev_view_ofs, ofs);
 	new tr = create_tr2(), bool:found = false;
 
