@@ -41,6 +41,7 @@ void CPlayer::PutInServer()
 	PwUpValue = 0;
 	killFlags = 0;
 	deathKiller = 0;
+	died = false;
 	state = oldstate = checkstate = 0;
 
 	speedActive = false;
@@ -51,7 +52,6 @@ void CPlayer::PutInServer()
 	items = 0;
     lastFrag = 0;
     lastKill = 0.0;
-	is_specialist = 0;
 
 	//debug
 	frags = 0;

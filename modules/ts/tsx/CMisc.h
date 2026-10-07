@@ -72,18 +72,23 @@ struct CPlayer {
 	int items; // "stale" przedmioty , super jump i kung fu bonus
 
 	//
-	int killingSpree;
-	int is_specialist;
+	int killingSpree; // the game's streak (player+0x744): kills since spawn, up to 255
 	int killFlags;
 	int lastFrag; // oblicz ostatni frag, sprawdza czy poprawna jest detekcja broni i bonusow 
-	float lastKill;  // kiedy ostatni , dla double kill
+	float lastKill;  // the game's last kill time (player+0x748), 0 after a double kill
 	//
 	int frags; // suma dla kontroli ostatniego fraga, to - v.frags = lastfrag
 	// The game's DeathMsg for this player's last death: who killed him, whether it names kung fu,
-	// and the TSKF_ stunt flag the killer's movement earned then.
+	// and the TSKF_ stunt flag the killer's movement earned then. With it, what PlayerKilled
+	// read when it scored the kill: whether it was a double kill, this player's streak and the
+	// killer's streak counting this kill.
 	int deathKiller;
 	bool deathKungFu;
 	int deathStunt;
+	bool deathDouble;
+	int deathSpree;
+	int deathKillerSpree;
+	bool died; // since his last spawn, which is when the game clears his streak
 
 	bool ingame;
 	float clearStats;

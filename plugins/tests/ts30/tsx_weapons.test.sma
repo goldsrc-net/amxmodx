@@ -29,6 +29,15 @@
 #define SKORPION	17
 #define KNIFE		25
 #define TS_DIVE		0x10	// pev->iuser4 while the game's dive lasts (CTSStunt::GoDive)
+// CBasePlayer (TS 3.0 Linux): how long a missed knife or katana slash, or a kung fu blow, stays
+// ready to land on whoever the player's stunt runs into (CTSStunt::CheckForBreakables), and which
+// it was (0 kung fu, 1 knife, 2 katana). KatanaFire sets them only when the slash hits nothing
+// (0x73a6d-0x73a97).
+#define PDATA_CLOSECOMBAT	(0x79c / 4)
+#define PDATA_CLOSECOMBAT_TYPE	0x7a4
+// A katana slash from 105 to 125 units away misses, and the dive is on the victim within 0.25 s.
+#define SHOVE_NEAR	105.0
+#define SHOVE_FAR	125.0
 
 new g_Victim
 new g_Weapon
@@ -40,6 +49,9 @@ new g_DamageWeapon
 new bool:g_Dive
 new g_DiveFrame
 new g_DeathStunt
+new bool:g_Shove
+new g_Slashes
+new bool:g_Armed
 
 public plugin_init()
 {
@@ -54,6 +66,9 @@ public bench_setup()
 	g_DamageWeapon = -1
 	g_Dive = false
 	g_DeathStunt = 0
+	g_Shove = false
+	g_Slashes = 0
+	g_Armed = false
 }
 
 public bench_teardown()
@@ -360,6 +375,22 @@ public test_kung_fu_kill_in_a_dive()
 	StartDuel()
 }
 
+// Close combat with a weapon in hand during a dive: the killer slashes with the katana while the
+// victim is still out of reach, so the slash misses and leaves the blow ready for 0.25 s, and the
+// dive carries him into the victim, who takes it (CTSStunt::CheckForBreakables). A slash that hits
+// leaves nothing ready, so the victim must die while one is. The game names the katana, not
+// kung fu (it marks close combat only for a kung fu blow), and scores it as a katana kill in a dive:
+// the katana's point and one for the dive.
+public test_katana_kill_by_dive_shove()
+{
+	g_Weapon = TSW_KATANA
+	g_Buttons = IN_ATTACK
+	g_Distance = 300.0
+	g_Dive = true
+	g_Shove = true
+	StartDuel()
+}
+
 StartDuel()
 {
 	new victim = bench_puppet("victim")
@@ -401,7 +432,20 @@ public duel_armed(killer)
 public duel_ready(killer)
 {
 	new Float:target[3]
-	ASSERT(bench_puppet_face(killer, g_Victim, g_Distance))
+	if (g_Shove)
+	{
+		// On ts_lobby's long flat floor (z 100) by the spawn point at -991 383, where a dive meets
+		// nothing but the victim.
+		engfunc(EngFunc_SetOrigin, killer, Float:{-991.0, 383.0, 137.0})
+		engfunc(EngFunc_SetOrigin, g_Victim, Float:{-691.0, 383.0, 137.0})
+		set_pev(killer, pev_velocity, Float:{0.0, 0.0, 0.0})
+		set_pev(g_Victim, pev_velocity, Float:{0.0, 0.0, 0.0})
+	}
+	else if (!bench_puppet_face(killer, g_Victim, g_Distance))
+	{
+		// Where the victim spawned has no room for the killer; he goes to the killer instead.
+		ASSERT(bench_check(bench_puppet_face(g_Victim, killer, g_Distance), "no room for the duel"))
+	}
 	pev(g_Victim, pev_origin, target)
 	bench_puppet_look_at(killer, target)
 	set_pev(g_Victim, pev_health, 1.0)
@@ -447,6 +491,21 @@ public bool:dive_attacking(killer)
 	new Float:target[3]
 	pev(g_Victim, pev_origin, target)
 	bench_puppet_look_at(killer, target)
+	if (g_Shove)
+	{
+		// Whether a missed slash is ready to land as he reaches the victim (this frame's, read
+		// once the victim is dead), and another slash if the last one ran out short of him.
+		new Float:ready = get_pdata_float(killer, PDATA_CLOSECOMBAT, 0, 0)
+		g_Armed = ready > 0.0 && get_pdata_byte(killer, PDATA_CLOSECOMBAT_TYPE, 0, 0) == 2
+		new Float:origin[3]
+		pev(killer, pev_origin, origin)
+		new Float:dist = get_distance_f(origin, target)
+		new bool:press = ready == 0.0 && g_Slashes < 3 && dist > SHOVE_NEAR && dist <= SHOVE_FAR
+		if (press)
+			g_Slashes++
+		bench_puppet_input(killer, press ? g_Buttons : 0, 400.0)
+		return false
+	}
 	bench_puppet_input(killer, (g_DiveFrame++ & 1) ? 0 : g_Buttons, 400.0)
 	return false
 }
@@ -527,6 +586,12 @@ public duel_counted(killer)
 	// The points: 2 for kung fu and a thrown knife, 1 for the rest, and a point more for a stunt,
 	// except in close combat. The killer started with none.
 	new points = (weapon == TSW_KUNG_FU || weapon == TSW_TKNIFE) ? 2 : 1
+	if (g_Shove)
+	{
+		// The slash missed and left the blow ready: the dive did the killing.
+		ASSERT(bench_check(g_Slashes > 0, "no slash before the victim died"))
+		ASSERT(bench_check(g_Armed, "no missed slash was ready when the victim died"))
+	}
 	if (g_Dive)
 	{
 		// The game saw the dive when it scored the kill, and said so to everyone.

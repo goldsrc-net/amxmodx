@@ -38,17 +38,47 @@ static int StuntFlags(edict_t *pKiller)
 	return 0;
 }
 
+// Whether pAttacker is on pVictim's team, which the game scores as a team kill.
+static bool TeamAttack(CPlayer* pVictim, CPlayer* pAttacker)
+{
+	if ( pVictim == pAttacker || !( pVictim->teamId || is_theonemode ) )
+		return false;
+	return pVictim->teamId == pAttacker->teamId;
+}
+
+// What PlayerKilled (0x795e4) reads before it sends the DeathMsg: every kill of another player
+// counts in the killer's streak, up to 255 (0x797ea), points or not; a kill worth points is a
+// double kill within 2 seconds of his last one (0x79797), and the game then forgets that last
+// kill (0x7aa97) or else remembers this one (0x7aab2). The victim's streak is read as it was.
+static void CountKill(CPlayer* pKiller, CPlayer* pVictim, bool scores)
+{
+	pVictim->deathSpree = pVictim->killingSpree;
+	if ( pKiller->killingSpree < 255 )
+		pKiller->killingSpree++;
+	pVictim->deathKillerSpree = pKiller->killingSpree;
+	pVictim->deathDouble = false;
+	if ( scores ){
+		pVictim->deathDouble = gpGlobals->time - pKiller->lastKill < 2.0;
+		pKiller->lastKill = pVictim->deathDouble ? 0.0f : gpGlobals->time;
+	}
+}
 
 void Client_ResetHUD_End(void* mValue)
 {
 	if ( mPlayer->IsAlive() ){ // ostatni przed spawn'em 
 		mPlayer->clearStats = gpGlobals->time + 0.25f; // teraz czysc statystyki 
 		mPlayer->deathKiller = 0;
+		// The game clears the streak and the last kill time when he spawns (TSInit, 0x82c24),
+		// not when he dies or asks for a full update.
+		if ( mPlayer->died ){
+			mPlayer->died = false;
+			mPlayer->killingSpree = 0;
+			mPlayer->lastKill = 0.0f;
+		}
 	}
 	else { // dalej "dead" nie czysc statystyk!
+		mPlayer->died = true;
 		mPlayer->items = 0;
-		mPlayer->is_specialist = 0;
-		mPlayer->killingSpree = 0;
 		mPlayer->killFlags = 0;
 		mPlayer->frags = (int)mPlayer->pEdict->v.frags;
 		/* 
@@ -152,11 +182,7 @@ void Client_TSHealth_End(void* mValue){
 	bool world = !pAttacker; // weapon 0 is kung fu, but not here
 	if ( !pAttacker ) pAttacker = mPlayer;
 
-	int TA = 0;
-	if ( mPlayer->teamId || is_theonemode  ){
-		if ( (mPlayer->teamId == pAttacker->teamId ) && (mPlayer != pAttacker) )
-			TA = 1;
-	}
+	int TA = TeamAttack(mPlayer, pAttacker) ? 1 : 0;
 
 	if ( weaponData[weapon].melee ) 
 		pAttacker->saveShot(world ? weapon : StatsSlot(weapon));
@@ -183,6 +209,13 @@ void Client_TSHealth_End(void* mValue){
 	// The game named kung fu in its DeathMsg when the kill was close combat, and the killer's
 	// stunt was read there, when the game scored it.
 	bool deathMsg = mPlayer->deathKiller == pAttacker->index;
+	if ( !mPlayer->deathKiller && mPlayer != pAttacker ) // no DeathMsg: count the kill now
+		CountKill(pAttacker, mPlayer, !TA);
+	else if ( !deathMsg ){ // it named someone else
+		mPlayer->deathDouble = false;
+		mPlayer->deathSpree = 0;
+		mPlayer->deathKillerSpree = 0;
+	}
 	mPlayer->deathKiller = 0;
 
 	if ( !TA && mPlayer!=pAttacker ) {
@@ -196,36 +229,27 @@ void Client_TSHealth_End(void* mValue){
 				weapon = TSWEAPON_KUNGFU;
 		}
 
-		int doubleKill = 0;
-		
-		if ( gpGlobals->time - pAttacker->lastKill < 1.0 )
-			doubleKill = 1;
-		
 		killFlags |= stuntKill;
-		
-		pAttacker->lastKill = gpGlobals->time;
-	
-		pAttacker->killingSpree++;
-
-		if ( pAttacker->killingSpree == 10 )
-			pAttacker->is_specialist = 1;
 	
 		// A stunt or a slide is a point more, but not in close combat, which kung fu always is.
 		pAttacker->lastFrag = weaponData[weapon].bonus + ( (stuntKill && weapon != TSWEAPON_KUNGFU) ? 1 : 0 );
 
-		if ( doubleKill ){
+		// Then PlayerKilled, for a kill worth points (0x7a429) and in its order: twice for a double kill (0x7a5d4), 5 more for killing
+		// the specialist, whose streak is 9 or more (0x7a632), and twice again once the killer's
+		// streak is 10 or more (0x7a792).
+		if ( mPlayer->deathDouble ){
 			pAttacker->lastFrag *= 2;
 			killFlags |= TSKF_DOUBLEKILL;
 		}
 
-		if ( pAttacker->is_specialist ){
-			pAttacker->lastFrag *= 2;
-			killFlags |= TSKF_ISSPEC;
-		}
-
-		if ( mPlayer->is_specialist ){
+		if ( mPlayer->deathSpree >= 9 ){
 			pAttacker->lastFrag += 5; 
 			killFlags |= TSKF_KILLEDSPEC;
+		}
+
+		if ( mPlayer->deathKillerSpree >= 10 ){
+			pAttacker->lastFrag *= 2;
+			killFlags |= TSKF_ISSPEC;
 		}
 
 		pAttacker->frags += pAttacker->lastFrag; 
@@ -316,7 +340,13 @@ void Client_DeathMsg(void* mValue)
 			CPlayer* pVictim = GET_PLAYER_POINTER_I(iVictim);
 			pVictim->deathKiller = iKiller;
 			pVictim->deathKungFu = strcmp( (char*)mValue, "Kung Fu" ) == 0;
-			pVictim->deathStunt = ( iKiller >= 1 && iKiller <= gpGlobals->maxClients ) ? StuntFlags( INDEXENT(iKiller) ) : 0;
+			pVictim->deathStunt = 0;
+			pVictim->died = true;
+			if ( iKiller >= 1 && iKiller <= gpGlobals->maxClients && iKiller != iVictim ){
+				CPlayer* pKiller = GET_PLAYER_POINTER_I(iKiller);
+				pVictim->deathStunt = StuntFlags( pKiller->pEdict );
+				CountKill( pKiller, pVictim, !TeamAttack(pVictim, pKiller) );
+			}
 		}
 		break;
 	}
