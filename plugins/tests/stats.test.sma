@@ -339,6 +339,18 @@ public test_top15()
 	}
 	if (!Puppets("<top>", 3))
 		return
+	// The Specialists 3.0 spawns a player who has just joined and puts him into spectate on his
+	// first frame (CTSGameRules::InitHUD). Until then a hit is no kill.
+	bench_wait_until("top15_down", "top15_hit", 5.0)
+}
+
+public top15_down()
+{
+	return !is_user_alive(g_P[0]) && !is_user_alive(g_P[1])
+}
+
+public top15_hit()
+{
 	new a = g_P[0], b = g_P[1]
 	On("SayTop15")
 	set_pev(a, pev_team, 1)
@@ -691,7 +703,6 @@ public self_dead(a)
 
 public test_team_attack_and_team_kill()
 {
-	// Same team (pev_team 0 for both).
 	if (!Puppets("mate", 2))
 		return
 	SpawnFirst(2, "mates_spawned")
@@ -700,6 +711,10 @@ public test_team_attack_and_team_kill()
 public mates_spawned()
 {
 	new a = g_P[0], b = g_P[1], expected[64]
+	// Same team. The Specialists 3.0 never writes a player's pev_team, so a slot keeps what an
+	// earlier test gave it.
+	set_pev(a, pev_team, 1)
+	set_pev(b, pev_team, 1)
 	On("TAInfo")
 	On("BulletDamage")
 	custom_weapon_dmg(g_Gun, a, b, 10, HIT_CHEST)
@@ -734,6 +749,8 @@ public test_team_attack_quiet_when_off()
 public mute_spawned()
 {
 	new a = g_P[0], b = g_P[1]
+	set_pev(a, pev_team, 1)
+	set_pev(b, pev_team, 1)
 	custom_weapon_dmg(g_Gun, a, b, 10, HIT_CHEST)
 	user_silentkill(b)
 	bench_wait_until("PuppetDead", "mute_dead", 5.0, b)
@@ -795,8 +812,8 @@ new g_Kill
 new g_Enemies[8]
 new g_EnemyCount
 
-// The Specialists runs teamplay here and mp_friendlyfire is off: the killer only hurts the other
-// team. The puppets alternate between the two teams as they join.
+// In teamplay with mp_friendlyfire off the killer only hurts the other team (the puppets alternate
+// between the two teams as they join); in deathmatch, where nobody has a team, he hurts everyone.
 public test_kill_flags()
 {
 	if (!Puppets("kf", 8))
@@ -812,10 +829,10 @@ public kf_spawned()
 	for (new i = 1; i < 8; i++)
 	{
 		get_user_team(g_P[i], other, charsmax(other))
-		if (!equal(team, other))
+		if (!team[0] || !equal(team, other))
 			g_Enemies[g_EnemyCount++] = g_P[i]
 	}
-	CHECK(g_EnemyCount >= 2, "puppets on both teams")
+	CHECK(g_EnemyCount >= 2, "two puppets to kill")
 	On("FragInfo")
 	On("DoubleKill")
 	On("DoubleKillSound")
