@@ -100,7 +100,7 @@ void FreeAllHandles(HandleType type)
 		q = g_Handles[i];
 		if (q && !q->isfree && q->type == type)
 		{
-			FreeHandle((unsigned int)i);
+			FreeHandle((unsigned int)i + 1);
 		}
 	}
 }
@@ -112,7 +112,7 @@ void FreeHandleTable()
 	{
 		q = g_Handles[i];
 		if (q && !q->isfree)
-			FreeHandle((unsigned int)i);
+			FreeHandle((unsigned int)i + 1);
 	}
 	g_Handles.clear();
 	while (!g_FreeHandles.empty())
