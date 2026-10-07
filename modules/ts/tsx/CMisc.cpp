@@ -33,6 +33,7 @@ void CPlayer::PutInServer()
 
 	speedActive = false;
 	speedBy = 0;
+	speedEntityCount = 0;
 
 	killingSpree = 0;
 	items = 0;
@@ -97,6 +98,7 @@ void CPlayer::Init( int pi, edict_t* pe )
 	ingame = false;
 	speedActive = false;
 	speedBy = 0;
+	speedEntityCount = 0;
 }
 
 void CPlayer::saveKill(CPlayer* pVictim, int wweapon, int hhs, int ttk)

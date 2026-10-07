@@ -18,19 +18,42 @@
 
 #include <amxmodx>
 #include <fakemeta>
+#include <xs>
 #include <tsx>
 #include <tsfun>
 #include <amxxbench>
+
+// The Specialists 3.0 weapon ids and the superjump powerup.
+#define GLOCK18		1
+#define M61			24
+#define KNIFE		25
+#define TS_SUPERJUMP	256
 
 new g_Other
 new Float:g_Start[3]
 new Float:g_SpeedEnd
 new g_Turns
 new Float:g_Distance
+new g_Thrown[4]
+new Float:g_Normal[4]
+
+// ts_createpwup as a plugin built with the include before the origin was declared calls it.
+native ts_createpwup_typeonly(pwup) = ts_createpwup;
 
 public plugin_init()
 {
 	register_plugin("TSX Player Tests", AMXX_VERSION_STR, "AMXX Dev Team")
+}
+
+public bench_teardown()
+{
+	// Thrown knives and dropped guns stay a while after the test.
+	new ent = -1
+	while ((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "knife")))
+		engfunc(EngFunc_RemoveEntity, ent)
+	ent = -1
+	while ((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "WorldGun")))
+		engfunc(EngFunc_RemoveEntity, ent)
 }
 
 Float:SlowFactor(id)
@@ -38,6 +61,12 @@ Float:SlowFactor(id)
 	new Float:value
 	pev(id, pev_fuser1, value)
 	return value
+}
+
+// The rate the game eases his fuser1 to (CBasePlayer::GoSlow); fuser1 gets there over a few frames.
+Float:SlowTarget(id)
+{
+	return get_ent_data_float(id, "CBasePlayer", "m_flSlowMotionGo")
 }
 
 bool:Near(Float:a, Float:b)
@@ -71,7 +100,22 @@ Float:LastFloat(id, const name[])
 	return bench_msg_float(msg, 0)
 }
 
-// What ts_createpwup does (its include leaves out the origin the native reads).
+Float:MaxSpeed(id)
+{
+	new Float:speed
+	pev(id, pev_maxspeed, speed)
+	return speed
+}
+
+// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up.
+SpeedBySlots(slots)
+{
+	if (slots > 80)
+		return 330
+	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_tozero)
+}
+
+// A powerup made the way ts_createpwup makes one, through fakemeta.
 CreatePowerup(const type[])
 {
 	new ent = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "ts_powerup"))
@@ -147,6 +191,35 @@ public bool:slots_sent(id)
 public slots_shown(id)
 {
 	ASSERT_EQ(ts_getuserspace(id), 50)
+	bench_pass()
+}
+
+public test_setting_slots_moves_the_speed()
+{
+	new id = bench_puppet("loader")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "loader_spawned", 20.0, "respawn")
+}
+
+public loader_spawned(id)
+{
+	bench_next("loader_settled", 0.5, id)
+}
+
+public loader_settled(id)
+{
+	// The speed the game gave him for his free slots.
+	new slots = ts_getuserslots(id)
+	new speed = floatround(MaxSpeed(id))
+	ASSERT_EQ(speed, SpeedBySlots(slots))
+
+	// Fewer free slots slow him as the game's own pickups would (239 for 20).
+	ts_setuserslots(id, 20)
+	ASSERT_EQ(floatround(MaxSpeed(id)), SpeedBySlots(20))
+
+	// And back.
+	ts_setuserslots(id, slots)
+	ASSERT_EQ(floatround(MaxSpeed(id)), speed)
 	bench_pass()
 }
 
@@ -307,6 +380,96 @@ public jumper_took(id)
 	bench_pass()
 }
 
+public test_createpwup_puts_a_powerup_a_player_picks_up()
+{
+	new id = bench_puppet("collector")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "collector_spawned", 20.0, "respawn")
+}
+
+public collector_spawned(id)
+{
+	bench_next("collector_settled", 0.5, id)
+}
+
+public collector_settled(id)
+{
+	ASSERT_EQ(ts_has_superjump(id), 0)
+	// Just over his head: it lands on him.
+	new Float:origin[3]
+	pev(id, pev_origin, origin)
+	origin[2] += 48.0
+	new ent = ts_createpwup(TS_SUPERJUMP, origin)
+	ASSERT(ent > 0)
+	new classname[32]
+	pev(ent, pev_classname, classname, charsmax(classname))
+	ASSERT_STR_EQ(classname, "ts_powerup")
+
+	// Where he stands, and linked there for the world to touch.
+	new Float:where[3], Float:absmin[3], Float:absmax[3]
+	pev(ent, pev_origin, where)
+	pev(ent, pev_absmin, absmin)
+	pev(ent, pev_absmax, absmax)
+	ASSERT(get_distance_f(where, origin) < 0.01)
+	ASSERT(absmin[0] <= origin[0] && origin[0] <= absmax[0] && absmin[1] <= origin[1] && origin[1] <= absmax[1])
+	bench_wait_until("collector_has_it", "collector_took", 4.0, id)
+}
+
+public bool:collector_has_it(id)
+{
+	return ts_has_superjump(id) == 1
+}
+
+public collector_took(id)
+{
+	// The game told him he picked it up.
+	ASSERT(bench_msg_count(id, "PwUp") >= 1)
+	bench_pass()
+}
+
+// The call a plugin built with the old include makes: the type alone.
+CreateTypeOnly(type)
+{
+	return ts_createpwup_typeonly(type)
+}
+
+public test_createpwup_with_the_type_alone()
+{
+	new id = bench_puppet("giftee")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "giftee_spawned", 20.0, "respawn")
+}
+
+public giftee_spawned(id)
+{
+	ASSERT_EQ(ts_has_fupowerup(id), 0)
+	new ent = CreateTypeOnly(TSPWUP_KUNGFU)
+	ASSERT(ent > 0)
+
+	// It stays where Spawn put it, for the plugin to move.
+	new Float:origin[3]
+	pev(ent, pev_origin, origin)
+	new what[96]
+	formatex(what, charsmax(what), "expected 0 0 0, received the bits %x %x %x", origin[0], origin[1], origin[2])
+	ASSERT(bench_check(origin[0] == 0.0 && origin[1] == 0.0 && origin[2] == 0.0, what))
+
+	// A working powerup: moved over his head, it lands on him.
+	pev(id, pev_origin, origin)
+	origin[2] += 48.0
+	engfunc(EngFunc_SetOrigin, ent, origin)
+	bench_wait_until("giftee_has_it", "giftee_took", 4.0, id)
+}
+
+public bool:giftee_has_it(id)
+{
+	return ts_has_fupowerup(id) == 1
+}
+
+public giftee_took(id)
+{
+	bench_pass()
+}
+
 // --- bullet time and physics speed -----------------------------------------------------------
 
 public test_bullettrail_is_the_bullet_time_flag()
@@ -451,8 +614,8 @@ public speed_back(id)
 
 public speed_slowed(id)
 {
-	ASSERT_NEAR(SlowFactor(id), 0.5)
-	ASSERT_NEAR(SlowFactor(g_Other), 0.5)
+	ASSERT_NEAR(SlowTarget(id), 0.5)
+	ASSERT_NEAR(SlowTarget(g_Other), 0.5)
 	ASSERT_NEAR(LastFloat(id, "TSSlowMo"), 50.0)
 	ASSERT_NEAR(Float:ts_is_in_slowmo(id), g_SpeedEnd)
 
@@ -477,7 +640,7 @@ public speed_ran_slow(id)
 	new what[64]
 	formatex(what, charsmax(what), "ran %.1f slowed, %.1f at the normal rate", distance, g_Distance)
 	ASSERT(bench_check(distance > g_Distance * 0.3 && distance < g_Distance * 0.7, what))
-	ASSERT_NEAR(SlowFactor(g_Other), 1.0)
+	ASSERT_NEAR(SlowTarget(g_Other), 1.0)
 	bench_next("speed_worn_off", 2.5, id)
 }
 
@@ -530,4 +693,195 @@ public test_set_speed_negative()
 public refused()
 {
 	bench_pass()
+}
+
+// --- ts_set_speed and what the player throws -------------------------------------------------
+//
+// The game's slow motion slows the grenades, thrown knives and dropped guns around its player as well:
+// their rate is pev->fuser1, and their physics scale velocity and gravity by it (gravity by its square).
+
+Float:Fuser1(ent)
+{
+	new Float:value
+	pev(ent, pev_fuser1, value)
+	return value
+}
+
+Float:Gravity(ent)
+{
+	new Float:value
+	pev(ent, pev_gravity, value)
+	return value
+}
+
+bool:Moving(ent)
+{
+	new Float:velocity[3]
+	pev(ent, pev_velocity, velocity)
+	return vector_length(velocity) > 0.0
+}
+
+FindClass(const classname[])
+{
+	return max(engfunc(EngFunc_FindEntityByString, -1, "classname", classname), 0)
+}
+
+// Throwing a little up, the way with the most room, keeps it in the air a while.
+LookUp(id)
+{
+	new Float:eye[3], Float:ofs[3]
+	pev(id, pev_origin, eye)
+	pev(id, pev_view_ofs, ofs)
+	xs_vec_add(eye, ofs, eye)
+
+	new Float:angles[3], Float:best[3], Float:most = -1.0
+	angles[0] = -20.0
+	for (new i = 0; i < 8; i++)
+	{
+		angles[1] = 45.0 * i
+		new Float:dir[3], Float:end[3], Float:fraction
+		angle_vector(angles, ANGLEVECTOR_FORWARD, dir)
+		xs_vec_mul_scalar(dir, 4000.0, dir)
+		xs_vec_add(eye, dir, end)
+		engfunc(EngFunc_TraceLine, eye, end, IGNORE_MONSTERS, id, 0)
+		get_tr2(0, TR_flFraction, fraction)
+		if (fraction > most)
+		{
+			most = fraction
+			best = angles
+		}
+	}
+	bench_puppet_angles(id, best)
+}
+
+// In the air at the normal rate: its gravity, then half speed for a second around the thrower.
+// Out of the aura it is left alone; in it, it slows at its next think.
+SlowInFlight(id, ent)
+{
+	g_Thrown[0] = ent
+	ASSERT(bench_check(Moving(ent), "it moves"))
+	ASSERT_NEAR(Fuser1(ent), 1.0)
+	g_Normal[0] = Gravity(ent)
+	ASSERT(g_Normal[0] > 0.0)
+
+	ASSERT_EQ(ts_set_speed(id, 0.5, 1.0, 1.0), 1)
+	ASSERT_NEAR(Fuser1(ent), 1.0)
+	ASSERT_EQ(ts_set_speed(id, 0.5, 2000.0, 1.0), 1)
+	ASSERT_NEAR(Fuser1(ent), 0.5)
+	bench_next("thrown_slowed", 0.15, id)
+}
+
+public thrown_slowed(id)
+{
+	new ent = g_Thrown[0]
+	ASSERT(pev_valid(ent))
+	ASSERT_NEAR(Fuser1(ent), 0.5)
+	ASSERT_NEAR(Gravity(ent), g_Normal[0] * 0.25)
+	bench_next("thrown_worn_off", 1.2, id)
+}
+
+public thrown_worn_off(id)
+{
+	new ent = g_Thrown[0]
+	if (pev_valid(ent))
+		ASSERT_NEAR(Fuser1(ent), 1.0)
+	ASSERT_EQ(ts_is_in_slowmo(id), 0)
+	bench_pass()
+}
+
+public test_set_speed_slows_a_dropped_gun()
+{
+	new id = bench_puppet("dropper")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "dropper_spawned", 20.0, "respawn")
+}
+
+public dropper_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	LookUp(id)
+	bench_next("dropper_ready", 1.0, id)
+}
+
+public dropper_ready(id)
+{
+	bench_puppet_cmd(id, "drop")
+	bench_wait_until("gun_dropped", "gun_flying", 1.0, id)
+}
+
+public bool:gun_dropped(id)
+{
+	return FindClass("WorldGun") != 0
+}
+
+public gun_flying(id)
+{
+	SlowInFlight(id, FindClass("WorldGun"))
+}
+
+public test_set_speed_slows_a_thrown_knife()
+{
+	new id = bench_puppet("knifer")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "knifer_spawned", 20.0, "respawn")
+}
+
+public knifer_spawned(id)
+{
+	ts_giveweapon(id, KNIFE, 1, 0)
+	LookUp(id)
+	bench_next("knifer_ready", 1.0, id)
+}
+
+public knifer_ready(id)
+{
+	bench_puppet_input(id, IN_ATTACK2)
+	bench_wait_until("knife_thrown", "knife_flying", 2.0, id)
+}
+
+public bool:knife_thrown(id)
+{
+	return FindClass("knife") != 0
+}
+
+public knife_flying(id)
+{
+	bench_puppet_input(id, 0)
+	SlowInFlight(id, FindClass("knife"))
+}
+
+public test_set_speed_slows_a_grenade()
+{
+	new id = bench_puppet("bowler")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "bowler_spawned", 20.0, "respawn")
+}
+
+public bowler_spawned(id)
+{
+	ts_giveweapon(id, M61, 1, 0)
+	LookUp(id)
+	bench_next("bowler_pull", 1.0, id)
+}
+
+public bowler_pull(id)
+{
+	bench_puppet_input(id, IN_ATTACK)
+	bench_next("bowler_release", 0.3, id)
+}
+
+public bowler_release(id)
+{
+	bench_puppet_input(id, 0)
+	bench_wait_until("grenade_thrown", "grenade_flying", 2.0, id)
+}
+
+public bool:grenade_thrown(id)
+{
+	return FindClass("grenade") != 0
+}
+
+public grenade_flying(id)
+{
+	SlowInFlight(id, FindClass("grenade"))
 }

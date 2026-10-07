@@ -28,6 +28,8 @@
 #define TSKNIFE_OFFSET			35
 #endif
 
+#define TS_SPEED_ENTITIES		32 // CBasePlayer's slowed entities
+
 #define TSPWUP_SLOWMO			1
 #define TSPWUP_INFAMMO			2
 #define TSPWUP_KUNGFU			4
@@ -86,6 +88,13 @@ struct CPlayer {
 	float speedValue;
 	float speedAura;
 	int speedBy;
+	// The grenades, thrown knives and dropped guns his ts_set_speed scales now (entity index and
+	// serial number), at most as many as the game's own slow motion keeps per player.
+	struct SpeedEntity {
+		int index;
+		int serial;
+	} speedEntities[TS_SPEED_ENTITIES];
+	int speedEntityCount;
 	
 	struct PlayerWeapon : public Stats {
 		char*		name;

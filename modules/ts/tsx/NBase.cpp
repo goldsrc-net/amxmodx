@@ -148,11 +148,11 @@ BEGIN_USER_FUNC(get_user_slots)
 	return get_pdata<int>(pPlayer->pEdict, m_iFreeSlots);
 END_USER_FUNC()
 
+static cell SetFreeSlots(AMX *amx, CPlayer *pPlayer, int slots);
+
 BEGIN_USER_FUNC(set_user_slots)
 	REQUIRE_TS30();
-	GET_OFFSET("CBasePlayer", m_iFreeSlots);
-	set_pdata<int>(pPlayer->pEdict, m_iFreeSlots, params[2]);
-	return 1;
+	return SetFreeSlots(amx, pPlayer, params[2]);
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(get_user_state)
@@ -245,6 +245,69 @@ static void EndSlow(edict_t *pEdict)
 		GoSlow(pEdict, 1.0f);
 }
 
+// The game's slow motion also slows the grenades, thrown knives and dropped guns (WorldGun) around its
+// player (CBasePlayer::SlowMotionFlow), knives and guns only while they move: CBaseEntity::GoSlow
+// stores the rate in pev->fuser1, and their physics (CTSPhysicObject::WaitThink) scale velocity,
+// spin and gravity by it until it is 1.0 again. TSX does the same for the ones in a ts_set_speed aura.
+static const char *speedClassnames[] = { "grenade", "knife", "WorldGun" };
+
+static bool InSpeedAura(CPlayer *pPlayer, edict_t *pEdict)
+{
+	return (pEdict->v.origin - pPlayer->pEdict->v.origin).Length() <= pPlayer->speedAura;
+}
+
+static edict_t *SpeedEntity(CPlayer *pPlayer, int i)
+{
+	edict_t *pEdict = INDEXENT(pPlayer->speedEntities[i].index);
+	if (FNullEnt(pEdict) || pEdict->free || pEdict->serialnumber != pPlayer->speedEntities[i].serial)
+		return NULL;
+	return pEdict;
+}
+
+static void UpdateSpeedEntities(CPlayer *pPlayer)
+{
+	// The ones already slowed keep the rate while they stay in the aura.
+	for (int i = 0; i < pPlayer->speedEntityCount; )
+	{
+		edict_t *pEdict = SpeedEntity(pPlayer, i);
+		if (pEdict && InSpeedAura(pPlayer, pEdict))
+		{
+			pEdict->v.fuser1 = pPlayer->speedValue;
+			++i;
+			continue;
+		}
+		if (pEdict)
+			pEdict->v.fuser1 = 1.0f;
+		pPlayer->speedEntities[i] = pPlayer->speedEntities[--pPlayer->speedEntityCount];
+	}
+
+	for (size_t c = 0; c < sizeof(speedClassnames) / sizeof(speedClassnames[0]); ++c)
+	{
+		edict_t *pEdict = NULL;
+		while (pPlayer->speedEntityCount < TS_SPEED_ENTITIES &&
+			!FNullEnt(pEdict = FIND_ENTITY_BY_STRING(pEdict, "classname", speedClassnames[c])))
+		{
+			if (!pEdict->pvPrivateData || !InSpeedAura(pPlayer, pEdict))
+				continue;
+			if (c > 0 && pEdict->v.velocity == Vector(0, 0, 0))
+				continue;
+			int index = ENTINDEX(pEdict);
+			int i;
+			for (i = 0; i < pPlayer->speedEntityCount; ++i)
+			{
+				if (pPlayer->speedEntities[i].index == index)
+					break;
+			}
+			if (i < pPlayer->speedEntityCount)
+				continue;
+			pEdict->v.fuser1 = pPlayer->speedValue;
+			pPlayer->speedEntities[i].index = index;
+			pPlayer->speedEntities[i].serial = pEdict->serialnumber;
+			++pPlayer->speedEntityCount;
+		}
+	}
+}
+
 void UpdateSpeed(CPlayer *pPlayer)
 {
 	if (gpGlobals->time >= pPlayer->speedEnd)
@@ -252,6 +315,8 @@ void UpdateSpeed(CPlayer *pPlayer)
 		EndSpeed(pPlayer);
 		return;
 	}
+
+	UpdateSpeedEntities(pPlayer);
 
 	for (int i = 1; i <= gpGlobals->maxClients; ++i)
 	{
@@ -279,6 +344,14 @@ void UpdateSpeed(CPlayer *pPlayer)
 void EndSpeed(CPlayer *pPlayer)
 {
 	pPlayer->speedActive = false;
+
+	for (int i = 0; i < pPlayer->speedEntityCount; ++i)
+	{
+		edict_t *pEdict = SpeedEntity(pPlayer, i);
+		if (pEdict)
+			pEdict->v.fuser1 = 1.0f;
+	}
+	pPlayer->speedEntityCount = 0;
 
 	for (int i = 1; i <= gpGlobals->maxClients; ++i)
 	{
@@ -388,6 +461,24 @@ typedef void (__fastcall *SetPlayerSpeedFunc)(void *pPlayer, int edx, float spee
 typedef void (*SetPlayerSpeedFunc)(void *pPlayer, float speed);
 #endif
 
+// Sets the player's free slots and the move speed that follows from them, as the game's own throws,
+// pickups and drops do: GetSpeedBySlots, then CBasePlayer::SetPlayerSpeed.
+static cell SetFreeSlots(AMX *amx, CPlayer *pPlayer, int slots)
+{
+	GET_OFFSET("CBasePlayer", m_iFreeSlots);
+	GET_SIGNATURE("GetSpeedBySlots", GetSpeedBySlots);
+	GET_SIGNATURE("SetPlayerSpeed", SetPlayerSpeed);
+	set_pdata<int>(pPlayer->pEdict, m_iFreeSlots, slots);
+	void *pvPlayer = pPlayer->pEdict->pvPrivateData;
+	float speed = reinterpret_cast<GetSpeedBySlotsFunc>(GetSpeedBySlots)(pvPlayer);
+#if defined(_WIN32)
+	reinterpret_cast<SetPlayerSpeedFunc>(SetPlayerSpeed)(pvPlayer, 0, speed);
+#else
+	reinterpret_cast<SetPlayerSpeedFunc>(SetPlayerSpeed)(pvPlayer, speed);
+#endif
+	return 1;
+}
+
 // A player's weapon_tsgun, the one item that holds his whole arsenal.
 static edict_t *GetPlayerGun(edict_t *pPlayer)
 {
@@ -467,8 +558,6 @@ BEGIN_USER_FUNC(set_user_ammo)
 	GET_OFFSET("s_weapon_status", bOwned);
 	GET_OFFSET("s_weapon_status", iClip);
 	GET_OFFSET("CBasePlayer", m_iFreeSlots);
-	GET_SIGNATURE("GetSpeedBySlots", GetSpeedBySlots);
-	GET_SIGNATURE("SetPlayerSpeed", SetPlayerSpeed);
 	int status = m_weaponStatus + weapon * TS_WEAPON_STATUS_SIZE;
 	if (!get_pdata<bool>(pGun, status + bOwned))
 		return 0;
@@ -476,16 +565,9 @@ BEGIN_USER_FUNC(set_user_ammo)
 	int freeSlots = get_pdata<int>(pPlayer->pEdict, m_iFreeSlots);
 	if (slots > freeSlots)
 		return 0;
-	set_pdata<int>(pPlayer->pEdict, m_iFreeSlots, freeSlots - slots);
+	if (!SetFreeSlots(amx, pPlayer, freeSlots - slots))
+		return 0;
 	set_pdata<int>(pGun, status + iClip, ammo);
-	// The move speed follows the free slots, as after the game's own throws and pickups.
-	void *pvPlayer = pPlayer->pEdict->pvPrivateData;
-	float speed = reinterpret_cast<GetSpeedBySlotsFunc>(GetSpeedBySlots)(pvPlayer);
-#if defined(_WIN32)
-	reinterpret_cast<SetPlayerSpeedFunc>(SetPlayerSpeed)(pvPlayer, 0, speed);
-#else
-	reinterpret_cast<SetPlayerSpeedFunc>(SetPlayerSpeed)(pvPlayer, speed);
-#endif
 	return 1;
 END_USER_FUNC()
 
@@ -724,16 +806,23 @@ static cell AMX_NATIVE_CALL create_pwup(AMX *amx, cell *params){ // pwup ,origin
 	pkvd.szValue = "";
 	pMDLL_KeyValue(pEntity, &pkvd);
 */
-	cell *vInput = MF_GetAmxAddr(amx,params[2]);
-
-	float fNewX = *(float *)((void *)&vInput[0]);
-	float fNewY = *(float *)((void *)&vInput[1]);
-	float fNewZ = *(float *)((void *)&vInput[2]);
-
-	vec3_t vNewValue = vec3_t(fNewX, fNewY, fNewZ);
-
 	MDLL_Spawn(pent);
-	pent->v.origin = vNewValue;
+
+	// Plugins built before the include declared the origin pass the type alone; their powerup stays
+	// at 0 0 0, where Spawn put it, for the plugin to move.
+	if (params[0] / sizeof(cell) >= 2)
+	{
+		cell *vInput = MF_GetAmxAddr(amx,params[2]);
+
+		float fNewX = *(float *)((void *)&vInput[0]);
+		float fNewY = *(float *)((void *)&vInput[1]);
+		float fNewZ = *(float *)((void *)&vInput[2]);
+
+		vec3_t vNewValue = vec3_t(fNewX, fNewY, fNewZ);
+
+		// Linked there, as CTSPowerUp::Spawn links it, so players touch it there at once.
+		SET_ORIGIN(pent, vNewValue);
+	}
 
 	return ENTINDEX(pent);
 }

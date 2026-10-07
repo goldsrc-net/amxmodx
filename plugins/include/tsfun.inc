@@ -66,6 +66,8 @@ native ts_wpnlogtoid(const logname[]);
 native ts_getusercash( index );
 native ts_setusercash( index, money );
 
+/* Gets or sets a player's free slots. His move speed follows them, as it does when the game
+ * changes them. */
 native ts_getuserslots( index );
 native ts_setuserslots( index, slots );
 
@@ -121,8 +123,8 @@ stock ts_has_armor(id) {
 	return (ts_getuserpwup(id) &TSPWUP_ARMOR);
 }
 
-/* Function will create pwup entity and return its index (pwupent) */
-native ts_createpwup( pwup );
+/* Function will create pwup entity at origin and return its index (pwupent) */
+native ts_createpwup( pwup, const Float:origin[3] = {0.0, 0.0, 0.0} );
 
 native ts_givepwup( index,pwupent );
 
@@ -198,7 +200,8 @@ native ts_set_fakeslowpause(id,Float:time);
 /* Sets speed artificially. 1.0 is default, Go into fractions and decimals for slower
 * and put in higher numbers for higher speeds. Aura is how far (in units) players around you are
 * effected, Time is the time until it wears off. 0.0 for speed will freeze people (so does
-* anything below 0.1). Negatives are an error. */
+* anything below 0.1). Negatives are an error. As with the game's own slow motion, grenades in the
+* aura are slowed too, and so are thrown knives and dropped guns while they move. */
 
 native ts_set_speed(id,Float:speed,Float:auradist,Float:time);
 
