@@ -893,9 +893,9 @@ public TeamTransfer_Dead()
 }
 
 // The same for SPECTATOR, silently (once stopped by reading CBasePlayer::m_iMenu, which the gamedata
-// only has for cstrike). On ts every player starts with team number 0, which the menu counts as
-// spectator; with pev_team set, the ScoreInfo ts sends when the target dies gives it a non-zero
-// one, so the SPECTATOR choice lists it.
+// only has for cstrike). The menu counts team number 0 as spectator. In teamplay the ScoreInfo ts
+// sends when the target dies gives it its team's number; in deathmatch every number stays 0 (on
+// reTS and the original alike), so there the test sends the target's ScoreInfo with team 1 itself.
 public test_team_transfer_spectator_silent()
 {
 	SpawnPuppets("pts", 2, "TeamSpec_Spawned")
@@ -905,7 +905,6 @@ public TeamSpec_Spawned()
 {
 	new admin = g_P[0], target = g_P[1]
 	SetFlags(admin, "m")
-	set_pev(target, pev_team, 1)
 	user_kill(target, 1)
 	bench_wait_until("PuppetDead", "TeamSpec_Killed", 5.0, target)
 }
@@ -913,6 +912,16 @@ public TeamSpec_Spawned()
 public TeamSpec_Killed()
 {
 	new admin = g_P[0], target = g_P[1]
+	if (get_user_team(target) <= 0)
+	{
+		emessage_begin(MSG_ALL, get_user_msgid("ScoreInfo"))
+		ewrite_byte(target)
+		ewrite_short(get_user_frags(target))
+		ewrite_short(get_user_deaths(target))
+		ewrite_short(0)
+		ewrite_short(1)
+		emessage_end()
+	}
 	ASSERT(get_user_team(target) > 0)
 	bench_puppet_cmd(admin, "amx_teammenu")
 	bench_puppet_cmd(admin, "menuselect 7")
@@ -922,7 +931,6 @@ public TeamSpec_Killed()
 	ASSERT(KeyEnabled(admin, PosOf(target)))
 	new before = bench_msg_count(admin, "ShowMenu")
 	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
-	set_pev(target, pev_team, 0)
 	ASSERT_MSG(admin, "", "ADMIN pts1: transfer pts2 to SPECTATOR")
 	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before + 1)
 	bench_pass()
