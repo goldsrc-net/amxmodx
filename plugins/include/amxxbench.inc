@@ -96,7 +96,9 @@ native bench_puppet_input(id, buttons, Float:fwd = 0.0, Float:side = 0.0, Float:
 native bench_puppet_angles(id, const Float:angles[3]);
 
 // Runs a console command from the puppet, as its client would send it: plugins' register_clcmd
-// handlers, read_argv/read_args and the game all see it. Example: bench_puppet_cmd(id, "kill").
+// handlers, read_argv/read_args and the game all see it. Example: bench_puppet_cmd(id, "say /help").
+// "kill" is the engine's command and goes to the game's ClientKill, as a client's does; Half-Life
+// kills the player, The Specialists does nothing for a puppet (use fakedamage there).
 native bench_puppet_cmd(id, const fmt[], any:...);
 
 // Sets a userinfo key on the puppet the way a client's setinfo does: the game and plugins
@@ -248,20 +250,40 @@ stock bench_puppet_look_at(id, const Float:target[3])
 	bench_puppet_angles(id, angles);
 }
 
-// Stands the puppet on the floor dist units from ent, on the first of eight compass points that has
-// room for it and a level line of sight from its eyes to ent, facing ent. Returns false if none.
+// Stands the puppet on the floor dist units from ent's bounds, on the first of eight compass points
+// that has room for it and a level line of sight from its eyes to ent, facing ent. Works for brush
+// entities (doors), whose origin is 0 0 0, as well as point entities. Returns false if none.
 stock bool:bench_puppet_face(id, ent, Float:dist = 56.0)
 {
-	new Float:center[3], Float:pos[3], Float:end[3], Float:eye[3], Float:ofs[3], Float:yaw;
-	pev(ent, pev_origin, center);
+	new Float:center[3], Float:half[3], Float:mins[3], Float:maxs[3];
+	new Float:pos[3], Float:end[3], Float:eye[3], Float:ofs[3], Float:yaw, Float:reach;
+	pev(ent, pev_absmin, mins);
+	pev(ent, pev_absmax, maxs);
+	if (maxs[0] > mins[0] || maxs[1] > mins[1] || maxs[2] > mins[2])
+	{
+		for (new k = 0; k < 3; k++)
+		{
+			center[k] = (mins[k] + maxs[k]) / 2.0;
+			half[k] = (maxs[k] - mins[k]) / 2.0;
+		}
+	}
+	else
+		pev(ent, pev_origin, center);
 	pev(id, pev_view_ofs, ofs);
 	new tr = create_tr2(), bool:found = false;
 
 	for (new i = 0; i < 8 && !found; i++)
 	{
 		yaw = float(i) * 45.0;
-		pos[0] = center[0] + floatcos(yaw, degrees) * dist;
-		pos[1] = center[1] + floatsin(yaw, degrees) * dist;
+		// From the center to the edge of the bounds along this direction, then dist further.
+		reach = 999999.0;
+		if (floatabs(floatcos(yaw, degrees)) > 0.001)
+			reach = floatmin(reach, half[0] / floatabs(floatcos(yaw, degrees)));
+		if (floatabs(floatsin(yaw, degrees)) > 0.001)
+			reach = floatmin(reach, half[1] / floatabs(floatsin(yaw, degrees)));
+		reach += dist;
+		pos[0] = center[0] + floatcos(yaw, degrees) * reach;
+		pos[1] = center[1] + floatsin(yaw, degrees) * reach;
 		pos[2] = center[2] + 18.0;
 
 		engfunc(EngFunc_TraceHull, pos, pos, DONT_IGNORE_MONSTERS, HULL_HUMAN, id, tr);
@@ -269,14 +291,14 @@ stock bool:bench_puppet_face(id, ent, Float:dist = 56.0)
 			continue;
 
 		end = pos;
-		end[2] -= 128.0;
+		end[2] -= 128.0 + half[2];
 		engfunc(EngFunc_TraceHull, pos, end, DONT_IGNORE_MONSTERS, HULL_HUMAN, id, tr);
 		get_tr2(tr, TR_vecEndPos, pos);
 
 		for (new k = 0; k < 3; k++)
 			eye[k] = pos[k] + ofs[k];
-		end[0] = eye[0] - floatcos(yaw, degrees) * (dist + 32.0);
-		end[1] = eye[1] - floatsin(yaw, degrees) * (dist + 32.0);
+		end[0] = eye[0] - floatcos(yaw, degrees) * (reach + 32.0);
+		end[1] = eye[1] - floatsin(yaw, degrees) * (reach + 32.0);
 		end[2] = eye[2];
 		engfunc(EngFunc_TraceLine, eye, end, DONT_IGNORE_MONSTERS, id, tr);
 		if (get_tr2(tr, TR_pHit) != ent)
