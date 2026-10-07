@@ -31,7 +31,7 @@ static cell AMX_NATIVE_CALL wpnlog_to_name(AMX *amx, cell *params)
 	int iLen;
 	char *log = MF_GetAmxString(amx,params[1],0,&iLen);
 	int i;
-	for ( i=1; i<TSMAX_WEAPONS; i++ ){
+	for ( i=0; i<TSMAX_WEAPONS; i++ ){
 		if ( strcmp(log,weaponData[i].logname ) == 0 )
 			return MF_SetAmxString(amx,params[2],weaponData[i].name,params[3]);
 	}
@@ -44,7 +44,7 @@ static cell AMX_NATIVE_CALL wpnlog_to_id(AMX *amx, cell *params)
 	char *log = MF_GetAmxString(amx,params[1],0,&iLen);
 
 	int i;
-	for (i=1; i<TSMAX_WEAPONS; i++ )
+	for (i=0; i<TSMAX_WEAPONS; i++ )
 	{
 		if ( strcmp(log,weaponData[i].logname) == 0 )
 			return i;
@@ -66,7 +66,7 @@ static cell AMX_NATIVE_CALL get_weapon_logname(AMX *amx, cell *params)
 static cell AMX_NATIVE_CALL is_melee(AMX *amx, cell *params)
 {
 	int id = params[1];
-	if (id<1 || id>=TSMAX_WEAPONS)
+	if (id<0 || id>=TSMAX_WEAPONS)
 	{ 
 		MF_LogError(amx, AMX_ERR_NATIVE, "Weapon %d is not valid", id);
 		return 0;

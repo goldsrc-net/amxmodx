@@ -15,6 +15,12 @@
 #include "amxxmodule.h"
 #include "tsx.h"
 
+// Where a weapon's stats go: slot 0 holds every weapon's, so kung fu has its own.
+static inline int StatsSlot(int weapon)
+{
+	return weapon == TSWEAPON_KUNGFU ? TSWEAPON_KUNGFU_STATS : weapon;
+}
+
 
 void Client_ResetHUD_End(void* mValue)
 {
@@ -54,8 +60,7 @@ void Client_WeaponInfo(void* mValue)
 	static int wpn;
 	switch(mState++){
 	case 0:
-		wpn =  *(int*)mValue;
-		if ( !wpn ) wpn = 36; // kung fu
+		wpn =  *(int*)mValue; // 0 is kung fu
 		mPlayer->current = wpn;
 		break;
 	case 1:
@@ -77,7 +82,7 @@ void Client_ClipInfo(void* mValue)
 {
 	int iValue = *(int*)mValue;
 	if ( iValue < mPlayer->weapons[mPlayer->current].clip ) {
-		mPlayer->saveShot(mPlayer->current);
+		mPlayer->saveShot(StatsSlot(mPlayer->current));
 	}
 	mPlayer->weapons[mPlayer->current].clip = iValue;
 }
@@ -98,7 +103,7 @@ void Client_TSHealth_End(void* mValue){
 		pAttacker = GET_PLAYER_POINTER(enemy);
 		weapon = pAttacker->current;
 		aim = pAttacker->aiming;
-		pAttacker->saveHit( mPlayer , weapon , damage, aim );
+		pAttacker->saveHit( mPlayer , StatsSlot(weapon) , damage, aim );
 	}
 	else {
 		char szCName[16];
@@ -120,12 +125,13 @@ void Client_TSHealth_End(void* mValue){
 
 			pAttacker = GET_PLAYER_POINTER( pOwner );
 			
-			weapon = 37; // throwing knife
+			weapon = TSWEAPON_TKNIFE; // throwing knife
 			aim = pAttacker ? pAttacker->aiming : 0;
 			if (pAttacker)
 				pAttacker->saveHit( mPlayer , weapon , damage, aim );
 		}
 	}
+	bool world = !pAttacker; // weapon 0 is kung fu, but not here
 	if ( !pAttacker ) pAttacker = mPlayer;
 
 	int TA = 0;
@@ -135,7 +141,7 @@ void Client_TSHealth_End(void* mValue){
 	}
 
 	if ( weaponData[weapon].melee ) 
-		pAttacker->saveShot(weapon);
+		pAttacker->saveShot(world ? weapon : StatsSlot(weapon));
 	
 	MF_ExecuteForward(g_damage_info,
 		(cell)pAttacker->index,
@@ -207,14 +213,14 @@ void Client_TSHealth_End(void* mValue){
 				if ( slpos )
 					killFlags |= TSKF_SLIDINGKILL;	
 				else  // moze to kung fu z bronia ?
-					weapon = 36;
+					weapon = TSWEAPON_KUNGFU;
 				pAttacker->lastFrag += (int)pAttacker->pEdict->v.frags - pAttacker->frags;
 				pAttacker->frags = (int)pAttacker->pEdict->v.frags;
 			}
 	}
 
 	pAttacker->killFlags = killFlags;
-	pAttacker->saveKill(mPlayer,weapon,( aim == 1 ) ? 1:0 ,TA);
+	pAttacker->saveKill(mPlayer,world ? weapon : StatsSlot(weapon),( aim == 1 ) ? 1:0 ,TA);
 	MF_ExecuteForward(g_death_info,
 		(cell)pAttacker->index,
 		(cell)mPlayer->index,
@@ -235,7 +241,7 @@ void Client_WStatus(void* mValue)
 	switch(mState++){
 	case 1:
 		if ( !*(int*)mValue ){
-			mPlayer->current = 36; // fix dla wytraconej broni
+			mPlayer->current = TSWEAPON_KUNGFU; // fix dla wytraconej broni
 		}
 		break;
 	}

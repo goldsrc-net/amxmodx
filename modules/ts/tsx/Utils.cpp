@@ -52,9 +52,10 @@ weapon_t weaponData[] = {
 	{ 0,"Sawed-off","sawed-off",1 }, // 33 
 	{ 1,"Katana", "katana",2 }, 
 	{ 1,"Seal Knife","seal_knife",1 }, // 35 
-	{ 1,"Kung Fu","kung_fu",3 }, // Again new id 36 
-	{ 1,"Throwing Knife","throwing_knife",2 }, // new id 37 
-	{ 0,"breakable", "breakable", 1 },
+	{ 0,"Contender G2","contender_g2",1 }, // 36 
+	{ 0,"Akimbo Skorpions","akimbo_skorpions",1 }, // 37 
+	{ 1,"Throwing Knife","throwing_knife",2 }, // 38, not a game id 
+	{ 1,"Kung Fu","kung_fu",3 }, // TSWEAPON_KUNGFU_STATS: kung fu's own stats, slot 0 holds every weapon's 
 };
 
 bool ignoreBots (edict_t *pEnt, edict_t *pOther){

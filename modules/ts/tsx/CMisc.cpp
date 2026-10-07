@@ -108,18 +108,19 @@ void CPlayer::saveKill(CPlayer* pVictim, int wweapon, int hhs, int ttk)
 		return;
 
 	pVictim->attackers[index].name = (char*)weaponData[wweapon].name;
+	int vw = pVictim->current == TSWEAPON_KUNGFU ? TSWEAPON_KUNGFU_STATS : pVictim->current;
 	pVictim->attackers[index].kills++;
 	pVictim->attackers[index].hs += hhs;
 	pVictim->attackers[index].tks += ttk;
 	pVictim->attackers[0].kills++;
 	pVictim->attackers[0].hs += hhs;
 	pVictim->attackers[0].tks += ttk;
-	pVictim->weapons[pVictim->current].deaths++;
+	pVictim->weapons[vw].deaths++;
 	pVictim->weapons[0].deaths++;
 	pVictim->life.deaths++;
 	
 	
-	pVictim->weaponsRnd[pVictim->current].deaths++; // DEC-Weapon (round) stats
+	pVictim->weaponsRnd[vw].deaths++; // DEC-Weapon (round) stats
 	pVictim->weaponsRnd[0].deaths++;                   // DEC-Weapon (round) stats
 	
 	int vi = pVictim->index;

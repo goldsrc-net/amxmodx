@@ -17,7 +17,7 @@
 #endif
 #define _tsconst_included
 
-#define TSMAX_WEAPONS 44	// 37 + throwing knife + brekable + 5 custom weapon slots
+#define TSMAX_WEAPONS 45	// 38 TS 3.0 weapons (0-37) + throwing knife + kung fu stats + 5 custom weapon slots
 
 #define TSPWUP_NONE			0
 #define TSPWUP_RANDOM			0
@@ -62,7 +62,8 @@
 #define STUNT_FLIP 5
 
 enum {
-  TSW_GLOCK18 = 1,
+  TSW_KUNG_FU = 0,
+  TSW_GLOCK18,
   TSW_UNK1,
   TSW_UZI,
   TSW_M3,
@@ -97,7 +98,8 @@ enum {
   TSW_SAWED_OFF,
   TSW_KATANA,
   TSW_SKNIFE,
-  TSW_KUNG_FU,
+  TSW_CONTENDER,
+  TSW_ASKORPION,
   TSW_TKNIFE,
 };
 
@@ -135,6 +137,7 @@ valid tsweaponid in TS_GiveWeapon
 33: "Sawed off"
 34: "Katana"
 35: "Seal Knife"
+36: "Contender G2"
 
 valid pwuptype in TS_GivePwUp
 

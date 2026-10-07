@@ -19,7 +19,13 @@
 #include "CRank.h"
 
 #define TSMAX_CUSTOMWPNS		5
-#define TSMAX_WEAPONS			39 + TSMAX_CUSTOMWPNS
+#define TSMAX_WEAPONS			40 + TSMAX_CUSTOMWPNS
+
+// The Specialists 3.0 weapon ids run 0 (kung fu) to 37; TSX adds the thrown knife. The stats keep
+// every weapon's totals in slot 0, so kung fu's own stats go in a slot of their own.
+#define TSWEAPON_KUNGFU			0
+#define TSWEAPON_TKNIFE			38
+#define TSWEAPON_KUNGFU_STATS	39
 
 
 #if defined(_WIN32)
