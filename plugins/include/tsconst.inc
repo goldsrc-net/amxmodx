@@ -103,6 +103,11 @@ enum {
   TSW_TKNIFE,
 };
 
+/* The Specialists 3.0 names for ids the list above names after older weapons. */
+#define TSW_BERETTA	TSW_UNK1	// Beretta 92F
+#define TSW_SKORPION	TSW_TMP		// Skorpion
+#define TSW_BRIEFCASE	TSW_C4		// Briefcase
+
 /* 
 valid tsweaponid in TS_GiveWeapon
 
