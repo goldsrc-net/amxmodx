@@ -11,8 +11,8 @@
 // Tests for adminslots.sma (Slots Reservation): amx_reservation kicks a player without
 // ADMIN_RESERVATION who takes a reserved slot, and amx_hideslots sets sv_visiblemaxplayers to
 // the public slots, one more once they fill, and back to the default (-1) when every slot shows.
-// The server runs with 8 slots. Reservation access comes from amx_default_access "b" (admin.sma
-// gives it to every player not in users.ini).
+// The counts follow the server's slots (MaxClients). Reservation access comes from
+// amx_default_access "b" (admin.sma gives it to every player not in users.ini).
 //
 
 #include <amxmodx>
@@ -55,10 +55,10 @@ AddPuppet(const name[])
 	return id
 }
 
-public test_server_has_eight_slots()
+public test_server_starts_empty()
 {
-	// The rest of the file counts on this.
-	ASSERT_EQ(MaxClients, 8)
+	// The rest of the file counts on this, and on room for a few public slots.
+	ASSERT(MaxClients >= 4)
 	ASSERT_EQ(get_playersnum_ex(GetPlayers_IncludeConnecting), 0)
 	bench_pass()
 }
@@ -81,26 +81,33 @@ public test_hideslots_without_reservation_does_nothing()
 
 public test_hideslots_shows_public_slots()
 {
-	set_cvar_num("amx_reservation", 2)
+	// Three public slots, the rest reserved.
+	new const publicSlots = 3
+	set_cvar_num("amx_reservation", MaxClients - publicSlots)
 	set_cvar_num("amx_hideslots", 1)
-	// No players: the six public slots show.
-	ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), 6)
+	// No players: the public slots show.
+	ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), publicSlots)
 	// The puppets have reservation access, so none is kicked.
 	set_cvar_string("amx_default_access", "b")
-	for (new i = 1; i <= 5; i++)
+	for (new count = 1; count <= MaxClients; count++)
 	{
-		ASSERT(AddPuppet(fmt("slot%d", i)) > 0)
-		ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), 6)
+		ASSERT(AddPuppet(fmt("slot%d", count)) > 0)
+		if (count < publicSlots)
+		{
+			// Public slots left: they are all that shows.
+			ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), publicSlots)
+		}
+		else if (count + 1 < MaxClients)
+		{
+			// The public slots are full: one more shows, so a reserved player can see a way in.
+			ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), count + 1)
+		}
+		else
+		{
+			// That would be every slot (or the server is full): the default comes back.
+			ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), -1)
+		}
 	}
-	// The public slots are full: one more shows, so a reserved player can see a way in.
-	ASSERT(AddPuppet("slot6") > 0)
-	ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), 7)
-	// Seven players: the eighth slot shows, which is every slot, so the default comes back.
-	ASSERT(AddPuppet("slot7") > 0)
-	ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), -1)
-	// A full server shows every slot too.
-	ASSERT(AddPuppet("slot8") > 0)
-	ASSERT_EQ(get_cvar_num("sv_visiblemaxplayers"), -1)
 	// Turning hiding off also gives the default.
 	set_cvar_num("sv_visiblemaxplayers", 5)
 	set_cvar_num("amx_hideslots", 0)
@@ -110,8 +117,9 @@ public test_hideslots_shows_public_slots()
 
 public test_reserved_slot_kicks_player_without_access()
 {
-	// One public slot.
-	set_cvar_num("amx_reservation", 7)
+	// One public slot. Without reservation access.
+	set_cvar_string("amx_default_access", "z")
+	set_cvar_num("amx_reservation", MaxClients - 1)
 	ASSERT(AddPuppet("firstin") > 0)
 	new late = AddPuppet("latecomer")
 	ASSERT(late > 0)

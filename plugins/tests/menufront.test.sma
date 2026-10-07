@@ -13,9 +13,9 @@
 // amx_addclientmenuitem up to the 127-item limit. A puppet opens the menus and answers them with
 // menuselect.
 //
-// The plugin has no way to remove an item, so the items these tests add stay until the map
-// changes. Every test counts the items it finds (CountItems) instead of assuming how many there
-// are, so the tests pass in any order.
+// The plugin has no way to remove an item, so a test that adds items ends by changing the map,
+// which takes them away, and checks the menu is back to the items it found (CountItems counts them
+// instead of assuming how many there are).
 //
 
 #include <amxmodx>
@@ -26,6 +26,8 @@
 
 new g_P[MAX_PLAYERS + 1]
 new g_PNum
+new g_Count
+new g_CountCmd[16]
 
 public plugin_init()
 {
@@ -162,6 +164,35 @@ AddItem(const cmd[], const text[], const command[], const flags[], const plugin[
 	server_exec()
 }
 
+// Changes the map to take the added items away; on the new map, the menu opened with cmd must
+// list count items again.
+ClearItems(const cmd[], count)
+{
+	bench_change_map("", equal(cmd, "amx_menu") ? "Cleared_ClientMap" : "Cleared_AdminMap", count)
+}
+
+public Cleared_AdminMap(count)
+{
+	g_Count = count
+	copy(g_CountCmd, charsmax(g_CountCmd), "amxmodmenu")
+	SpawnPuppets("fclear", 1, "Cleared_Spawned")
+}
+
+public Cleared_ClientMap(count)
+{
+	g_Count = count
+	copy(g_CountCmd, charsmax(g_CountCmd), "amx_menu")
+	SpawnPuppets("fclear", 1, "Cleared_Spawned")
+}
+
+public Cleared_Spawned()
+{
+	new id = g_P[0]
+	SetFlags(id, "abcdefghijklmnopqrstuv")
+	ASSERT_EQ(CountItems(id, g_CountCmd), g_Count)
+	bench_pass()
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tests
 
@@ -247,8 +278,8 @@ public Limited_Spawned()
 	bench_pass()
 }
 
-// Picking an item closes the menu and has the player run the item's command (client_cmd, which
-// a puppet does not execute).
+// Picking an item closes the menu and has the player run the item's command (client_cmd: a
+// stufftext, which a puppet does not execute).
 public test_item_closes_menu()
 {
 	SpawnPuppets("fitem", 1, "Item_Spawned")
@@ -261,6 +292,7 @@ public Item_Spawned()
 	bench_puppet_cmd(id, "amxmodmenu")
 	new before = bench_msg_count(id, "ShowMenu")
 	bench_puppet_cmd(id, "menuselect 1")
+	ASSERT_MSG(id, "stufftext", "amx_kickmenu")
 	ASSERT_EQ(bench_msg_count(id, "ShowMenu"), before)
 	ASSERT(MenuClosed(id))
 	bench_pass()
@@ -279,12 +311,7 @@ public AddAdmin_Spawned()
 	SetFlags(id, "abcdefghijklmnopqrstuv")
 	new count = CountItems(id, "amxmodmenu")
 	ASSERT(count >= 18)
-	if (count + 2 > MAXITEMS - 1)
-	{
-		// The limit test already filled the menu; it covers the rest.
-		bench_pass()
-		return
-	}
+	bench_set_timeout(60.0)
 
 	server_cmd("amx_addmenuitem ^"Bench Short^" bench_short")
 	server_exec()
@@ -302,7 +329,7 @@ public AddAdmin_Spawned()
 	OpenPage(id, "amxmodmenu", (count + 1) / 8)
 	ASSERT_MENU(id, "^n#. Bench Hidden^n")
 	ASSERT_FALSE(MenuKeys(id) & (1 << ((count + 1) % 8)))
-	bench_pass()
+	ClearItems("amxmodmenu", count)
 }
 
 // The client menu: empty until items are added, then items for everyone, items that need
@@ -323,11 +350,7 @@ public Client_Spawned()
 		ASSERT_MENU(id, "AMX Mod X Client Menu 1/0^n^n^n0. Exit")
 		ASSERT_EQ(MenuKeys(id), MENU_KEY_0)
 	}
-	if (count + 10 > MAXITEMS - 1)
-	{
-		bench_pass()
-		return
-	}
+	bench_set_timeout(60.0)
 
 	server_cmd("amx_addclientmenuitem ^"Bench Short^" bench_short")
 	server_exec()
@@ -366,9 +389,13 @@ public Client_Spawned()
 	bench_puppet_cmd(id, "menuselect 10")
 	ASSERT_MENU(id, "AMX Mod X Client Menu 1/")
 
-	// An item closes the menu (its command goes to the player with client_cmd).
+	// An item closes the menu and its command goes to the player with client_cmd.
 	new before = bench_msg_count(id, "ShowMenu")
 	bench_puppet_cmd(id, "menuselect 1")
+	if (count == 0)
+	{
+		ASSERT_MSG(id, "stufftext", "bench_client")
+	}
 	ASSERT_EQ(bench_msg_count(id, "ShowMenu"), before)
 	ASSERT(MenuClosed(id))
 
@@ -376,7 +403,7 @@ public Client_Spawned()
 	before = bench_msg_count(id, "ShowMenu")
 	bench_puppet_cmd(id, "menuselect 10")
 	ASSERT_EQ(bench_msg_count(id, "ShowMenu"), before)
-	bench_pass()
+	ClearItems("amx_menu", count)
 }
 
 // Both menus stop at 127 items: the 128th is refused (and logged).
@@ -390,15 +417,16 @@ public Limit_Spawned()
 	new id = g_P[0]
 	SetFlags(id, "abcdefghijklmnopqrstuv")
 	new count = CountItems(id, "amxmodmenu")
+	bench_set_timeout(60.0)
 	for (new i = count; i < MAXITEMS + 2; i++)
 		AddItem("amx_addmenuitem", "Bench Filler", "bench_filler", "", "Menus Front-End")
 	ASSERT_EQ(CountItems(id, "amxmodmenu"), MAXITEMS)
 	ASSERT_MENU(id, "AMX Mod X Menu 16/16^n")
 
-	count = CountItems(id, "amx_menu")
-	for (new i = count; i < MAXITEMS + 2; i++)
+	new clientCount = CountItems(id, "amx_menu")
+	for (new i = clientCount; i < MAXITEMS + 2; i++)
 		AddItem("amx_addclientmenuitem", "Bench Filler", "bench_filler", "", "Menus Front-End")
 	ASSERT_EQ(CountItems(id, "amx_menu"), MAXITEMS)
 	ASSERT_MENU(id, "AMX Mod X Client Menu 16/16^n")
-	bench_pass()
+	ClearItems("amxmodmenu", count)
 }

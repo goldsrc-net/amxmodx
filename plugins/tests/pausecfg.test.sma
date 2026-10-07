@@ -13,7 +13,9 @@
 // and stopped are the helpers next to this file: Pause Target (pausecfg_pause.test.sma), Stop
 // Target (pausecfg_stop.test.sma, stopped for good by the first test that stops it) and Failed
 // Target (pausecfg_fail.test.sma, failed on load). configs/pausecfg.ini is put back after every
-// test.
+// test. Two tests change the map: one to empty the unpauseable list it fills, one to load a
+// plugin in "running" status (a copy of Pause Target, from a per-map plugin list, which loads
+// without debug) next to one that cannot load ("bad load").
 //
 
 #include <amxmodx>
@@ -24,6 +26,9 @@
 #define STOP_TARGET		"tests/pausecfg_stop.test.amxx"
 #define FAIL_TARGET		"tests/pausecfg_fail.test.amxx"
 #define NO_FILE_MARKER	"; amxxbench: there was no pausecfg.ini"
+#define RUNNING_COPY	"pausecfg_running.amxx"
+#define MISSING_PLUGIN	"pausecfg_missing.amxx"
+#define MAP_LIST_MARKER	"; amxxbench: written by pausecfg.test.sma"
 
 // The titles pausecfg.sma's plugin_cfg marks as unpauseable.
 new const g_SystemTitles[][] =
@@ -42,16 +47,19 @@ public plugin_init()
 	bench_coverage_ignore("pausecfg.sma", 214, 214, "Next is only offered while a further page exists, and plugins are never unloaded")
 	bench_coverage_ignore("pausecfg.sma", 229, 231, "colored_menus() is false on The Specialists")
 	bench_coverage_ignore("pausecfg.sma", 109, 109, "write_file raises a native error when it cannot write (as file.inc documents) instead of returning 0, so saveSettings never fails")
-	bench_coverage_ignore("pausecfg.sma", 356, 356, "the unpauseable list cannot be emptied, so filling it (32 marks) would change every later test")
 	bench_coverage_ignore("pausecfg.sma", 376, 376, "write_file raises a native error when it cannot write (as file.inc documents) instead of returning 0, so saveSettings never fails")
 	bench_coverage_ignore("pausecfg.sma", 497, 497, "write_file raises a native error when it cannot write (as file.inc documents) instead of returning 0, so saveSettings never fails")
 }
 
 public bench_setup()
 {
+	// Left by a run that stopped before it cleaned up.
+	RemoveMapPluginList()
 	get_configsdir(g_File, charsmax(g_File))
 	formatex(g_SavedFile, charsmax(g_SavedFile), "%s/pausecfg.ini.bench", g_File)
 	add(g_File, charsmax(g_File), "/pausecfg.ini")
+	if (dir_exists(g_File))
+		rmdir(g_File)
 	// A saved copy already there is the server's own (or the marker for none), left by a run
 	// that stopped before teardown: keep it, and drop the pausecfg.ini that run wrote.
 	if (file_exists(g_SavedFile))
@@ -65,6 +73,12 @@ public bench_setup()
 
 public bench_teardown()
 {
+	// A test that changed the map runs this in the copy of the file on the new map, which has
+	// not saved anything: the test put pausecfg.ini back itself.
+	if (!g_File[0])
+		return
+	if (dir_exists(g_File))
+		rmdir(g_File)
 	unpause("ac", PAUSE_TARGET)
 	// Saving clears the plugin's "modified" mark; the file it writes is replaced below.
 	server_cmd("amx_pausecfg save")
@@ -173,6 +187,71 @@ OpenMenuAt(id, const file[])
 	for (new page = 0; page < plugin / 6; page++)
 		bench_puppet_cmd(id, "menuselect 9")
 	return plugin % 6 + 1
+}
+
+// Copies of the path of a plugin file and of this map's plugin list.
+PluginPath(const file[], path[], len)
+{
+	get_localinfo("amxx_pluginsdir", path, len)
+	if (!path[0])
+		copy(path, len, "addons/amxmodx/plugins")
+	add(path, len, "/")
+	add(path, len, file)
+}
+
+MapPluginList(path[], len, dir[] = "", dirlen = 0)
+{
+	new map[32]
+	get_mapname(map, charsmax(map))
+	get_configsdir(path, len)
+	add(path, len, "/maps")
+	copy(dir, dirlen, path)
+	add(path, len, fmt("/plugins-%s.ini", map))
+}
+
+// Removes this map's plugin list and the plugin copy, if a test of this file wrote them.
+RemoveMapPluginList()
+{
+	new path[PLATFORM_MAX_PATH], dir[PLATFORM_MAX_PATH], line[64], len
+	MapPluginList(path, charsmax(path), dir, charsmax(dir))
+	if (file_exists(path))
+	{
+		read_file(path, 0, line, charsmax(line), len)
+		if (!equal(line, MAP_LIST_MARKER))
+			return
+		delete_file(path)
+		// The directory is only there for the list.
+		rmdir(dir)
+	}
+	PluginPath(RUNNING_COPY, path, charsmax(path))
+	delete_file(path)
+}
+
+bool:CopyFile(const from[], const to[])
+{
+	new in = fopen(from, "rb")
+	if (!in)
+		return false
+	new out = fopen(to, "wb")
+	if (!out)
+	{
+		fclose(in)
+		return false
+	}
+	new buffer[512], n
+	while ((n = fread_blocks(in, buffer, sizeof(buffer), BLOCK_BYTE)) > 0)
+		fwrite_blocks(out, buffer, n, BLOCK_BYTE)
+	fclose(in)
+	fclose(out)
+	return true
+}
+
+// Puts pausecfg.ini back now, for a test about to change the map: teardown runs in the copy of this
+// file on the new map, which has not saved it.
+RestoreConfig()
+{
+	bench_teardown()
+	g_File[0] = 0
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -520,5 +599,135 @@ public MenuSave_Spawned(id)
 	bench_puppet_cmd(id, "menuselect 7")
 	ASSERT_MSG(id, "", "* Configuration file cleared. Reload the map if needed")
 	ASSERT_FALSE(file_exists(g_File))
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Failures
+
+// saveSettings checks write_file's result, but write_file raises a native error instead of
+// returning 0 (file.inc says so), so "Configuration saving failed!!!" is never printed: the save
+// stops with a run time error. pausecfg.ini is a directory here, so it cannot be written.
+public test_save_fails_with_native_error()
+{
+	StartWithAdmin("failsaver", "FailSave_Spawned")
+}
+
+public FailSave_Spawned(id)
+{
+	SetAccess(id, ADMIN_CFG)
+	ASSERT(mkdir(g_File) == 0)
+	bench_expect_error("write_file")
+	bench_puppet_cmd(id, "amx_pausecfg save")
+	ASSERT_EQ(bench_msg_count(id, "", "Configuration saved successfully"), 0)
+	ASSERT_EQ(bench_msg_count(id, "", "Configuration saving failed"), 0)
+	bench_pass()
+}
+
+// The unpauseable list holds 32 plugins: the next add is refused. A map change empties it again.
+public test_unpauseable_list_full()
+{
+	bench_set_timeout(120.0)
+	for (new i = 0; i <= 32; i++)
+		server_cmd("amx_pausecfg add ^"Admin Base^"")
+	server_exec()
+	ASSERT_MSG(0, "server", "Can't mark more plugins as unpauseable!")
+	RestoreConfig()
+	bench_change_map("", "ListFull_Changed")
+}
+
+public ListFull_Changed()
+{
+	// plugin_cfg marked its six titles again, five of them loaded: room for 27 more.
+	new before = bench_msg_count(0, "server", "Can't mark more")
+	for (new i = 0; i < 27; i++)
+		server_cmd("amx_pausecfg add ^"Admin Base^"")
+	server_exec()
+	ASSERT_EQ(bench_msg_count(0, "server", "Can't mark more"), before)
+	server_cmd("amx_pausecfg add ^"Admin Base^"")
+	server_exec()
+	ASSERT_EQ(bench_msg_count(0, "server", "Can't mark more"), before + 1)
+	bench_change_map("", "ListFull_Emptied")
+}
+
+public ListFull_Emptied()
+{
+	bench_pass()
+}
+
+// A plugin in "running" status (loaded from a per-map plugin list, without debug) is On in the
+// menu and can be paused there; one that cannot be loaded ("bad load") is shown as error, without
+// a key. The plugin is a copy of Pause Target; the list and the copy are removed afterwards, and
+// the map changed again.
+public test_menu_running_and_bad_load()
+{
+	bench_set_timeout(180.0)
+	new path[PLATFORM_MAX_PATH], dir[PLATFORM_MAX_PATH], from[PLATFORM_MAX_PATH]
+	MapPluginList(path, charsmax(path), dir, charsmax(dir))
+	if (!bench_check(!file_exists(path), "no plugin list for this map yet"))
+		return
+	PluginPath(PAUSE_TARGET, from, charsmax(from))
+	PluginPath(RUNNING_COPY, dir, charsmax(dir))
+	ASSERT(CopyFile(from, dir))
+	MapPluginList(path, charsmax(path), dir, charsmax(dir))
+	if (!dir_exists(dir))
+		ASSERT(mkdir(dir) == 0)
+	write_file(path, MAP_LIST_MARKER)
+	write_file(path, RUNNING_COPY)
+	write_file(path, MISSING_PLUGIN)
+	RestoreConfig()
+	bench_change_map("", "Running_Loaded")
+}
+
+public Running_Loaded()
+{
+	ASSERT_STR_EQ(Status(RUNNING_COPY), "running")
+	ASSERT_STR_EQ(Status(MISSING_PLUGIN), "bad load")
+	StartWithAdmin("runningpauser", "Running_Spawned")
+}
+
+public Running_Spawned(id)
+{
+	SetAccess(id, ADMIN_CFG)
+	new text[96], status[16]
+
+	// The list counts the plugins in "running" status on its page.
+	new first = find_plugin_byfile(RUNNING_COPY), n = get_pluginsnum(), last = min(first + 10, n), running = 0
+	for (new i = first; i < last; i++)
+	{
+		get_plugin(i, "", 0, "", 0, "", 0, "", 0, status, charsmax(status))
+		if (status[0] == 'r')
+			running++
+	}
+	ASSERT(running >= 1)
+	bench_puppet_cmd(id, "amx_pausecfg list %d", first + 1)
+	// The file column is 16 wide and cut to 15 characters.
+	ASSERT_MSG(id, "", "pausecfg_runnin  running")
+	formatex(text, charsmax(text), "----- Entries %d - %d of %d (%d running) -----", first + 1, last, n, running)
+	ASSERT_MSG(id, "", text)
+
+	new row = OpenMenuAt(id, RUNNING_COPY)
+	formatex(text, charsmax(text), "%d. Pause Target On", row)
+	ASSERT_MENU(id, text)
+	bench_puppet_cmd(id, "menuselect %d", row)
+	ASSERT_STR_EQ(Status(RUNNING_COPY), "paused")
+	formatex(text, charsmax(text), "%d. Pause Target Off", row)
+	ASSERT_MENU(id, text)
+	bench_puppet_cmd(id, "menuselect 10")
+
+	row = OpenMenuAt(id, MISSING_PLUGIN)
+	// A plugin that did not load has no title.
+	ASSERT_MENU(id, "#. unknown error")
+	ASSERT_FALSE(MenuKeys(id) & (1 << (row - 1)))
+	bench_puppet_cmd(id, "menuselect 10")
+
+	RemoveMapPluginList()
+	bench_change_map("", "Running_Removed")
+}
+
+public Running_Removed()
+{
+	ASSERT_EQ(find_plugin_byfile(RUNNING_COPY), -1)
+	ASSERT_EQ(find_plugin_byfile(MISSING_PLUGIN), -1)
 	bench_pass()
 }

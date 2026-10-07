@@ -309,32 +309,69 @@ public rank_spawned()
 	bench_pass()
 }
 
+// The rank is kept by name, and TSX saves it to tsstats.dat at every map change, so "<top>1" and
+// others may already have stats from an earlier test or run. The test gives "<top>1" enough kills
+// to pass the top score, and expects its earlier stats plus those.
+new g_TopBefore[STATSX_MAX_STATS]
+new g_TopKills
+
+Score(const stats[STATSX_MAX_STATS])
+{
+	return stats[STATSX_KILLS] - stats[STATSX_DEATHS] - stats[STATSX_TEAMKILLS]
+}
+
 public test_top15()
 {
 	// TS Stats writes "<" and ">" in names as "[" and "]" (the MOTD is HTML on some clients).
+	new top[STATSX_MAX_STATS], bodyhits[MAX_BODYHITS], name[32]
+	RankedStats("<top>1", g_TopBefore)
+	g_TopKills = 2
+	if (get_statsnum() > 0)
+	{
+		get_stats(0, top, bodyhits, name, charsmax(name))
+		g_TopKills = max(2, Score(top) - Score(g_TopBefore) + 1)
+	}
 	if (!Puppets("<top>", 3))
 		return
 	new a = g_P[0], b = g_P[1]
 	On("SayTop15")
 	set_pev(a, pev_team, 1)
 	set_pev(b, pev_team, 2)
-	// Two kills put the first one at the top. TSX adds a player's stats to the rank when they
-	// leave.
-	custom_weapon_dmg(g_Gun, a, b, 100, HIT_CHEST)
-	custom_weapon_dmg(g_Gun, a, b, 100, HIT_CHEST)
+	// TSX adds a player's stats to the rank when they leave.
+	for (new i = 0; i < g_TopKills; i++)
+		custom_weapon_dmg(g_Gun, a, b, 100, HIT_CHEST)
 	server_cmd("kick #%d", get_user_userid(a))
 	server_cmd("kick #%d", get_user_userid(b))
 	server_exec()
 	bench_next("top15_asked", 0.1)
 }
 
+// The ranked stats of name, or zeros if it has no entry.
+RankedStats(const name[], stats[STATSX_MAX_STATS])
+{
+	new bodyhits[MAX_BODYHITS], ranked[32], next = 0, i
+	do
+	{
+		next = get_stats(i = next, stats, bodyhits, ranked, charsmax(ranked))
+		if (equal(ranked, name))
+			return
+	}
+	while (next)
+	for (i = 0; i < STATSX_MAX_STATS; i++)
+		stats[i] = 0
+}
+
 public top15_asked()
 {
-	new id = g_P[2]
+	new id = g_P[2], line[128], b[STATSX_MAX_STATS]
+	b = g_TopBefore
 	bench_puppet_say(id, "/top15")
 	ASSERT_MSG(id, "ServerName", "Top 15")
 	if (!MotdHas(id, "#   nick                           kills/deaths    TKs      hits/shots/headshots^n")) return
-	if (!MotdHas(id, " 1.  [top]1                          2/0          0            2/0/0^n")) return
+	formatex(line, charsmax(line), " 1.  %-28.27s    %d/%d          %d            %d/%d/%d^n", "[top]1",
+		b[STATSX_KILLS] + g_TopKills, b[STATSX_DEATHS], b[STATSX_TEAMKILLS], b[STATSX_HITS] + g_TopKills,
+		b[STATSX_SHOTS], b[STATSX_HEADSHOTS])
+	if (!MotdHas(id, line)) return
 	ASSERT_EQ(bench_msg_count(id, "MOTD", "<top>"), 0)
 	bench_pass()
 }
@@ -527,6 +564,8 @@ public death_spawned()
 
 	// Frag info for the killer.
 	CHECK(Hud(g_K, "LastKill: ") != BenchMsg:0, "death check 10")
+	// The headshot sound, to everyone.
+	CHECK(bench_msg_last(g_C, "stufftext", "spk misc/headshot") != BenchMsg:0, "headshot sound")
 
 	// "say /hp" repeats it in chat.
 	bench_puppet_say(g_V, "/hp")
@@ -800,6 +839,7 @@ public kf_flags()
 	ASSERT(Hud(k, "[ stunt ]") != BenchMsg:0)
 	ASSERT(Hud(k, " sliding ") != BenchMsg:0)
 	ASSERT(Hud(k, " double ") != BenchMsg:0)
+	ASSERT_MSG(k, "stufftext", "spk misc/doublekill")
 	formatex(expected, charsmax(expected), "Wow! %s made a double kill !!!", Name(k))
 	ASSERT(Hud(k, expected) != BenchMsg:0)
 	bench_next("kf_next", 0.0)

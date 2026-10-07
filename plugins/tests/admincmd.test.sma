@@ -41,6 +41,9 @@ new Float:g_SavedPausable
 new g_SavedPassword[64]
 new g_SavedRcon[64]
 new g_SavedCfgFile[64]
+// Set by bench_setup; false in the copy of this file a map change loads, which has nothing to put
+// back (the test restores everything before it changes the map).
+new bool:g_SetUp
 
 new g_Boss
 new g_Target
@@ -85,10 +88,18 @@ public bench_setup()
 
 	g_Boss = g_Target = g_Third = g_Fourth = g_Bot = 0
 	g_Batch = 0
+	g_SetUp = true
 }
 
 public bench_teardown()
 {
+	if (g_SetUp)
+		Restore()
+}
+
+Restore()
+{
+	g_SetUp = false
 	// Let the commands the plugin queued finish first (each "wait" in them stops one pass), so a
 	// late writeid or writeip cannot rewrite a ban file after it is put back.
 	for (new i = 0; i < 4; i++)
@@ -945,6 +956,8 @@ public plugins()
 	// From the server console it hands over to "amxx plugins".
 	server_cmd("amx_plugins")
 	server_exec()
+	ASSERT_MSG(0, "server", "Currently loaded plugins:")
+	ASSERT_EQ(bench_msg_count(0, "server", "----- Currently loaded plugins -----"), 0)
 	bench_pass()
 }
 
@@ -986,6 +999,35 @@ public map()
 	bench_puppet_cmd(g_Boss, "amx_map nosuchmap_qq")
 	bench_puppet_cmd(g_Boss, "amx_map ../ts/maps/ts_lobby")
 	ASSERT_EQ(CountPrint(g_Boss, print_console, "[AMXX] Map with that name not found or map is invalid"), 2)
+	bench_pass()
+}
+
+// A valid map: everyone is told, and two seconds later the level changes (to the same map here).
+// This also runs the plugin's plugin_end.
+public test_map_changes_level()
+{
+	bench_set_timeout(60.0)
+	Start("f", "mapwatch", "", "map_change")
+}
+
+public map_change()
+{
+	new mapname[32]
+	get_mapname(mapname, charsmax(mapname))
+	bench_expect_map_change("map_changed")
+	bench_puppet_cmd(g_Boss, "amx_map %s", mapname)
+	ASSERT_EQ(CountPrint(g_Boss, print_chat, fmt("ADMIN boss: changelevel %s", mapname)), 1)
+	ASSERT_EQ(CountPrint(g_Target, print_chat, fmt("ADMIN boss: changelevel %s", mapname)), 1)
+	// Not at once: the change is a task.
+	ASSERT(is_user_connected(g_Target))
+	// This copy of the file is gone after the change, so put everything back now.
+	Restore()
+}
+
+public map_changed()
+{
+	// A new map: game time starts again.
+	ASSERT(get_gametime() < 10.0)
 	bench_pass()
 }
 
@@ -1037,8 +1079,9 @@ public cfg()
 }
 
 // ---------------------------------------------------------------------------------------------
-// amx_pause and its pauseAck handshake. A puppet never runs the "pause;pauseAck" it is sent, so
-// the tests answer pauseAck themselves; the game is never actually paused.
+// amx_pause and its pauseAck handshake. A puppet never runs the "pause;pauseAck" it is sent (the
+// tests see it as a stufftext message), so the tests answer pauseAck themselves; the game is never
+// actually paused.
 
 public test_pause_handshake()
 {
@@ -1055,6 +1098,8 @@ public pause_steps()
 	bench_puppet_cmd(g_Boss, "amx_pause")
 	ASSERT_EQ(CountPrint(g_Boss, print_console, "[AMXX] pausing"), 1)
 	ASSERT_EQ(CountPrint(g_Boss, print_chat, "ADMIN boss: pause server"), 1)
+	// The client is told to pause and answer.
+	ASSERT_MSG(g_Boss, "stufftext", "pause;pauseAck")
 	// pausable is turned on until the client answers.
 	ASSERT_EQ(get_cvar_num("pausable"), 1)
 	bench_puppet_cmd(g_Boss, "pauseAck")
@@ -1078,6 +1123,7 @@ public test_pause_from_server_console()
 	server_cmd("amx_pause")
 	server_exec()
 	ASSERT_EQ(get_cvar_num("pausable"), 0)
+	ASSERT_MSG(0, "server", "[AMXX] Server was unable to pause the game. Real players on server are needed.")
 
 	// With a player, the first one in the game is used.
 	g_Target = bench_puppet("pausecarrier")
@@ -1085,6 +1131,8 @@ public test_pause_from_server_console()
 	server_cmd("amx_pause")
 	server_exec()
 	ASSERT_EQ(get_cvar_num("pausable"), 1)
+	ASSERT_MSG(0, "server", "[AMXX] pausing")
+	ASSERT_MSG(g_Target, "stufftext", "pause;pauseAck")
 	bench_puppet_cmd(g_Target, "pauseAck")
 	ASSERT_EQ(get_cvar_num("pausable"), 0)
 	server_cmd("amx_pause")
@@ -1179,6 +1227,8 @@ public showrcon()
 	get_pcvar_string(g_Cvar, value, charsmax(value))
 	ASSERT_STR_EQ(value, "showrcon1")
 	ASSERT_EQ(bench_msg_count(g_Boss, "TextMsg", "showrcon2"), 0)
+	ASSERT_MSG(g_Boss, "stufftext", "rcon_password benchpw")
+	ASSERT_MSG(g_Boss, "stufftext", "rcon bench_admincmd_cvar showrcon2")
 	bench_pass()
 }
 

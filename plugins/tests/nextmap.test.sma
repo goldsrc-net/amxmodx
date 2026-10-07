@@ -9,9 +9,8 @@
 
 //
 // Tests for nextmap.sma (NextMap): "say nextmap" with valid and invalid amx_nextmap values, "say
-// currentmap", "say ff", and what the plugin does at intermission. The map change itself would end
-// the run: the intermission test makes mp_chattime long, then removes the change before it runs.
-// amx_nextmap, mp_friendlyfire and mp_chattime are put back after each test.
+// currentmap", "say ff", the map change at intermission, and the map cycle position kept across
+// map changes. amx_nextmap, mp_friendlyfire and mp_chattime are put back after each test.
 //
 
 #include <amxmodx>
@@ -23,6 +22,7 @@ new g_FriendlyFire
 new Float:g_ChatTime
 new g_CycleNext[32]
 new Float:g_FloodTime
+new bool:g_SetupRan
 
 public plugin_init()
 {
@@ -38,10 +38,17 @@ public bench_setup()
 	g_FloodTime = get_cvar_float("amx_flood_time")
 	set_cvar_float("amx_flood_time", 0.0)
 	g_Puppet = 0
+	g_SetupRan = true
+	RestoreCycle()
 }
 
 public bench_teardown()
 {
+	RestoreCycle()
+	// After a map change the test that made it has put back what it changed, and the values
+	// saved at setup are gone.
+	if (!g_SetupRan)
+		return
 	set_cvar_string("amx_nextmap", g_NextMap)
 	set_cvar_num("mp_friendlyfire", g_FriendlyFire)
 	set_cvar_float("mp_chattime", g_ChatTime)
@@ -54,25 +61,14 @@ bool:StartPuppet(const name[])
 	return bench_check(g_Puppet > 0, "puppet created")
 }
 
-// The map the plugin picked from the map cycle at load: the first valid one, on a fresh server.
+// The map the plugin picked from the map cycle at load: the one at the position it keeps in
+// localinfo "lastmapcycle" ("<mapcyclefile> <position>").
 CycleNext()
 {
-	new cycle[64], line[64]
-	get_cvar_string("mapcyclefile", cycle, charsmax(cycle))
-	new f = fopen(cycle, "rt")
-	g_CycleNext[0] = EOS
-	if (!f)
-		return
-	while (fgets(f, line, charsmax(line)))
-	{
-		trim(line)
-		if (line[0] && is_map_valid(line))
-		{
-			copy(g_CycleNext, charsmax(g_CycleNext), line)
-			break
-		}
-	}
-	fclose(f)
+	new value[80], cycle[64], pos[8]
+	get_localinfo("lastmapcycle", value, charsmax(value))
+	parse(value, cycle, charsmax(cycle), pos, charsmax(pos))
+	CycleMap(str_to_num(pos), g_CycleNext, charsmax(g_CycleNext))
 }
 
 SayNextMap(const value[])
@@ -169,24 +165,120 @@ public test_say_ff()
 	bench_pass()
 }
 
-public test_intermission_schedules_the_change()
+// At intermission the plugin makes mp_chattime 2 seconds longer and changes to amx_nextmap after
+// the old mp_chattime; at map end it takes the 2 seconds back.
+public test_intermission_changes_the_map()
 {
 	// No other one-off task pending (ID 0 is the one the change uses).
 	ASSERT_FALSE(task_exists(0, 1))
-	set_cvar_float("mp_chattime", 100000.0)
+	new Float:chattime = get_cvar_float("mp_chattime")
+	set_cvar_float("mp_chattime", 0.5)
+	new map[32]
+	get_mapname(map, charsmax(map))
+	set_cvar_string("amx_nextmap", map)
 	emessage_begin(MSG_ALL, SVC_INTERMISSION)
 	emessage_end()
 
-	// mp_chattime is made 2 seconds longer and the change waits for the old value.
-	ASSERT(floatabs(get_cvar_float("mp_chattime") - 100002.0) < 0.01)
-	new found = task_exists(0, 1)
-	// Remove it (and TS Stats' end of map stats task) before checking anything else.
-	remove_task(0, 1)
-	ASSERT(found)
+	ASSERT(floatabs(get_cvar_float("mp_chattime") - 2.5) < 0.01)
+	ASSERT(task_exists(0, 1))
+	bench_expect_map_change("after_intermission", _:chattime)
+}
 
-	// At map end the plugin takes the 2 seconds back.
-	ASSERT(callfunc_begin("plugin_end", "nextmap.amxx") == 1)
-	callfunc_end()
-	ASSERT(floatabs(get_cvar_float("mp_chattime") - 100000.0) < 0.01)
+public after_intermission(Float:chattime)
+{
+	ASSERT(floatabs(get_cvar_float("mp_chattime") - 0.5) < 0.01)
+	set_cvar_float("mp_chattime", chattime)
+	bench_pass()
+}
+
+// The valid maps of the map cycle, as the plugin counts them; n from 1.
+CycleMap(n, map[], len)
+{
+	new cycle[64], line[64], count = 0
+	get_cvar_string("mapcyclefile", cycle, charsmax(cycle))
+	map[0] = EOS
+	new f = fopen(cycle, "rt")
+	if (!f)
+		return 0
+	while (fgets(f, line, charsmax(line)))
+	{
+		trim(line)
+		if (!isalnum(line[0]) || !is_map_valid(line))
+			continue
+		if (++count == n)
+			copy(map, len, line)
+	}
+	fclose(f)
+	return count
+}
+
+// The plugin keeps "<mapcyclefile> <position>" in localinfo "lastmapcycle" and goes on from there
+// on the next map. First with a map cycle of this test's (lines not starting with a letter or
+// digit, and maps that do not exist, are skipped), from its second map; then with the server's,
+// from past the end, which starts over.
+#define TEST_CYCLE "bench_mapcycle.txt"
+
+// Where the server's mapcyclefile is kept across the map changes.
+new const CYCLE_KEY[] = "bench_nextmap_cycle"
+
+RestoreCycle()
+{
+	new cycle[64]
+	get_localinfo(CYCLE_KEY, cycle, charsmax(cycle))
+	if (cycle[0])
+	{
+		set_cvar_string("mapcyclefile", cycle)
+		set_localinfo(CYCLE_KEY, "")
+	}
+	delete_file(TEST_CYCLE)
+}
+
+public test_map_cycle_position_carries_over()
+{
+	new cycle[64]
+	get_cvar_string("mapcyclefile", cycle, charsmax(cycle))
+	ASSERT(cycle[0] != EOS)
+	set_localinfo(CYCLE_KEY, cycle)
+	new f = fopen(TEST_CYCLE, "wt")
+	ASSERT(f)
+	fputs(f, "// maps^nts_lobby^n^nno_such_map^nts_awaken^nts_hammertime^nts_central^n")
+	fclose(f)
+	set_cvar_string("mapcyclefile", TEST_CYCLE)
+	set_localinfo("lastmapcycle", "bench_mapcycle.txt 2")
+	bench_set_timeout(120.0)
+	bench_change_map("", "from_the_second")
+}
+
+bool:CycleAt(const map[], const cycle[], pos)
+{
+	new value[80], expected[80]
+	get_cvar_string("amx_nextmap", value, charsmax(value))
+	if (!__bench_str_eq(value, map))
+		return false
+	get_localinfo("lastmapcycle", value, charsmax(value))
+	formatex(expected, charsmax(expected), "%s %d", cycle, pos)
+	return __bench_str_eq(value, expected)
+}
+
+public from_the_second()
+{
+	// Past ts_lobby and ts_awaken: the third map.
+	if (!CycleAt("ts_hammertime", TEST_CYCLE, 3))
+		return
+	RestoreCycle()
+	new cycle[64], value[80]
+	get_cvar_string("mapcyclefile", cycle, charsmax(cycle))
+	formatex(value, charsmax(value), "%s 999", cycle)
+	set_localinfo("lastmapcycle", value)
+	bench_change_map("", "from_the_start")
+}
+
+public from_the_start()
+{
+	new cycle[64], first[32]
+	get_cvar_string("mapcyclefile", cycle, charsmax(cycle))
+	CycleMap(1, first, charsmax(first))
+	if (!CycleAt(first, cycle, 1))
+		return
 	bench_pass()
 }

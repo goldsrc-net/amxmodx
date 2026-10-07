@@ -17,6 +17,10 @@
 // run means the file there now is that run's), and the bans are lifted. The ban times and slap
 // damages are set back to the plugin's defaults.
 //
+// The client commands test installs its own clcmds.ini (fixtures/plmenu_clcmds.ini), which plmenu
+// reads in plugin_init, and changes the map for it; it puts the server's own back the same way
+// (a ".bench" copy or a ".bench-none" marker next to it) and changes the map again.
+//
 
 #include <amxmodx>
 #include <amxmisc>
@@ -29,15 +33,19 @@ new g_P[MAX_PLAYERS + 1]
 new g_PNum
 new g_Banned[MAX_PLAYERS][44]
 new g_BannedNum
+new g_ClcmdsFile[PLATFORM_MAX_PATH]
 
 public plugin_init()
 {
 	register_plugin("Players Menu Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 
+	get_configsdir(g_ClcmdsFile, charsmax(g_ClcmdsFile))
+	add(g_ClcmdsFile, charsmax(g_ClcmdsFile), "/clcmds.ini")
+
 	bench_coverage_ignore("plmenu.sma", 125, 125, "the cstrike module, which is not loaded on ts")
 	bench_coverage_ignore("plmenu.sma", 136, 137, "cstrike and czero only; the server runs ts")
-	bench_coverage_ignore("plmenu.sma", 155, 156, "amx_tempban_maxtime missing: admincmd.amxx, loaded before plmenu, registers it")
-	bench_coverage_ignore("plmenu.sma", 214, 214, "a module other than cstrike or fakemeta failing to load; plmenu requires no other")
+	bench_coverage_ignore("plmenu.sma", 155, 156, "amx_tempban_maxtime missing: admincmd registers it on the server's first map and the engine keeps a cvar for the server's life, so plmenu finds it on every map, even one with admincmd disabled")
+	bench_coverage_ignore("plmenu.sma", 207, 221, "runs while AMX Mod X loads plugins, with its debugger off")
 	bench_coverage_ignore("plmenu.sma", 224, 224, "a cstrike native called without the module; plmenu only calls them when cstrike is loaded")
 	bench_coverage_ignore("plmenu.sma", 365, 365, "colored menus, which AMX Mod X turns off for ts")
 	bench_coverage_ignore("plmenu.sma", 425, 425, "an empty ban time list: amx_plmenu_bantimes always leaves at least one")
@@ -46,13 +54,18 @@ public plugin_init()
 	bench_coverage_ignore("plmenu.sma", 620, 620, "an empty slap list: amx_plmenu_slapdmg always leaves at least two")
 	bench_coverage_ignore("plmenu.sma", 708, 708, "colored menus, which AMX Mod X turns off for ts")
 	bench_coverage_ignore("plmenu.sma", 761, 776, "TeamInfo and TextMsg handlers registered on cstrike and czero only")
-	bench_coverage_ignore("plmenu.sma", 834, 834, "a cstrike player choosing a model (m_iMenu); the server runs ts")
-	bench_coverage_ignore("plmenu.sma", 839, 839, "fakemeta not loaded; amxxbench needs it, so it always is")
-	bench_coverage_ignore("plmenu.sma", 845, 852, "cstrike team change; the cstrike module is not loaded on ts")
-	bench_coverage_ignore("plmenu.sma", 902, 902, "cstrike model reset; the cstrike module is not loaded on ts")
-	bench_coverage_ignore("plmenu.sma", 953, 971, "cstrike teams; the cstrike module is not loaded on ts")
-	bench_coverage_ignore("plmenu.sma", 988, 988, "colored menus, which AMX Mod X turns off for ts")
-	bench_coverage_ignore("plmenu.sma", 1141, 1141, "colored menus, which AMX Mod X turns off for ts")
+	bench_coverage_ignore("plmenu.sma", 830, 840, "Counter-Strike's class menu (m_iMenu, joinclass), run only with the cstrike module, which is not loaded on ts")
+	bench_coverage_ignore("plmenu.sma", 846, 853, "cstrike team change; the cstrike module is not loaded on ts")
+	bench_coverage_ignore("plmenu.sma", 864, 864, "Counter-Strike's m_bTeamChanged, set only with the cstrike module, which is not loaded on ts")
+	bench_coverage_ignore("plmenu.sma", 869, 871, "mp_limitteams, a Counter-Strike cvar that ts does not have")
+	bench_coverage_ignore("plmenu.sma", 879, 882, "allow_spectators, a Counter-Strike cvar that ts does not have")
+	bench_coverage_ignore("plmenu.sma", 888, 888, "allow_spectators, a Counter-Strike cvar that ts does not have")
+	bench_coverage_ignore("plmenu.sma", 898, 898, "mp_limitteams, a Counter-Strike cvar that ts does not have")
+	bench_coverage_ignore("plmenu.sma", 903, 903, "cstrike model reset; the cstrike module is not loaded on ts")
+	bench_coverage_ignore("plmenu.sma", 907, 907, "Counter-Strike's m_bTeamChanged, set only with the cstrike module, which is not loaded on ts")
+	bench_coverage_ignore("plmenu.sma", 954, 972, "cstrike teams; the cstrike module is not loaded on ts")
+	bench_coverage_ignore("plmenu.sma", 989, 989, "colored menus, which AMX Mod X turns off for ts")
+	bench_coverage_ignore("plmenu.sma", 1146, 1146, "colored menus, which AMX Mod X turns off for ts")
 }
 
 public bench_setup()
@@ -76,9 +89,11 @@ public bench_setup()
 			fclose(fopen(none, "wt"))
 		}
 	}
-	// A run that stopped mid-test may have left 127.0.0.1 banned, which keeps puppets out.
+	// A run that stopped mid-test may have left 127.0.0.1 banned, which keeps puppets out, or its
+	// clcmds.ini in place of the server's.
 	server_cmd("removeip 127.0.0.1")
 	server_exec()
+	RestoreConfig(g_ClcmdsFile)
 	g_BannedNum = 0
 	g_PNum = 0
 }
@@ -108,6 +123,8 @@ public bench_teardown()
 	server_exec()
 	server_cmd("amx_plmenu_slapdmg 0 1 5")
 	server_exec()
+
+	RestoreConfig(g_ClcmdsFile)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -231,6 +248,51 @@ KickPuppet(p)
 	server_exec()
 }
 
+// Puts fixture (empty: no file at all) in place of file, keeping the server's own as file.bench, or
+// a file.bench-none marker when it has none. A second call keeps the first one's copy.
+SwapConfig(const file[], const fixture[])
+{
+	new saved[PLATFORM_MAX_PATH], none[PLATFORM_MAX_PATH]
+	formatex(saved, charsmax(saved), "%s.bench", file)
+	formatex(none, charsmax(none), "%s.bench-none", file)
+	if (!file_exists(saved) && !file_exists(none))
+	{
+		if (file_exists(file))
+			rename_file(file, saved, 1)
+		else
+			fclose(fopen(none, "wt"))
+	}
+	delete_file(file)
+	if (fixture[0])
+	{
+		new path[PLATFORM_MAX_PATH], line[256]
+		bench_fixture(fixture, path, charsmax(path))
+		new in = fopen(path, "rt"), out = fopen(file, "wt")
+		while (fgets(in, line, charsmax(line)))
+			fputs(out, line)
+		fclose(in)
+		fclose(out)
+	}
+}
+
+// Puts the server's own file back after SwapConfig.
+RestoreConfig(const file[])
+{
+	new saved[PLATFORM_MAX_PATH], none[PLATFORM_MAX_PATH]
+	formatex(saved, charsmax(saved), "%s.bench", file)
+	formatex(none, charsmax(none), "%s.bench-none", file)
+	if (file_exists(saved))
+	{
+		delete_file(file)
+		rename_file(saved, file, 1)
+	}
+	else if (file_exists(none))
+	{
+		delete_file(file)
+		delete_file(none)
+	}
+}
+
 // ---------------------------------------------------------------------------------------------
 // Access
 
@@ -287,6 +349,35 @@ public Kick_Spawned()
 	bench_puppet_cmd(admin, "menuselect 10")
 	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before)
 	ASSERT(MenuClosed(admin))
+	bench_pass()
+}
+
+// Nine players, eight per page: the ninth is alone on page 2. Kicking it leaves page 2 empty, and
+// the menu falls back to the first page.
+public test_kick_pages()
+{
+	SpawnPuppets("pkp", 9, "KickPages_Spawned")
+}
+
+public KickPages_Spawned()
+{
+	new admin = g_P[0], last = g_P[8]
+	SetFlags(admin, "c")
+	ASSERT_EQ(PosOf(last), 9)
+	bench_puppet_cmd(admin, "amx_kickmenu")
+	ASSERT_MENU(admin, "Kick Menu 1/2^n")
+	ASSERT_MENU(admin, "8. pkp8^n^n9. More...^n0. Exit")
+	ASSERT_NOT_MENU(admin, "pkp9")
+	bench_puppet_cmd(admin, "menuselect 9")
+	ASSERT_MENU(admin, "Kick Menu 2/2^n^n1. pkp9^n^n0. Back")
+	bench_puppet_cmd(admin, "menuselect 10")
+	ASSERT_MENU(admin, "Kick Menu 1/2^n")
+	bench_puppet_cmd(admin, "menuselect 9")
+
+	bench_puppet_cmd(admin, "menuselect 1")
+	ASSERT_FALSE(is_user_connected(last))
+	ASSERT_MSG(admin, "", "ADMIN pkp1: kick pkp9")
+	ASSERT_MENU(admin, "Kick Menu 1/1^n")
 	bench_pass()
 }
 
@@ -423,6 +514,7 @@ public BanCmd_Spawned()
 	SetFlags(admin, "d")
 	server_cmd("amx_plmenu_bantimes")
 	server_exec()
+	ASSERT_MSG(0, "server", "usage: amx_plmenu_bantimes <time1> [time2] [time3] ...")
 	bench_puppet_cmd(admin, "amx_banmenu")
 	ASSERT_MENU(admin, "^n8. Ban permanently^n")
 
@@ -604,6 +696,7 @@ public SlapCmd_Spawned()
 	SetFlags(admin, "e")
 	server_cmd("amx_plmenu_slapdmg")
 	server_exec()
+	ASSERT_MSG(0, "server", "usage: amx_plmenu_slapdmg <dmg1> [dmg2] [dmg3] ...")
 	bench_puppet_cmd(admin, "amx_slapmenu")
 	ASSERT_MENU(admin, "^n8. Slap with 0 damage^n")
 
@@ -778,8 +871,8 @@ public TeamTransfer_Spawned()
 	bench_pass()
 }
 
-// Bug, the same for SPECTATOR: plmenu.sma:831 reads CBasePlayer::m_iMenu, which the gamedata
-// only has for cstrike. On ts every player starts with team number 0, which the menu counts as
+// The same for SPECTATOR, silently (once stopped by reading CBasePlayer::m_iMenu, which the gamedata
+// only has for cstrike). On ts every player starts with team number 0, which the menu counts as
 // spectator; with pev_team set, the ScoreInfo ts sends when the target dies gives it a non-zero
 // one, so the SPECTATOR choice lists it.
 public test_team_transfer_spectator_silent()
@@ -839,7 +932,7 @@ public TeamSilent_Spawned()
 
 // clcmds.ini has four entries, all "u": 8 steps through them. "Slay player" ("bd") runs on the
 // admin's console and returns to the menu; "Kick player" ("b") does not return. The commands go
-// to the admin with client_cmd, which a puppet does not execute.
+// to the admin with client_cmd (stufftext, which a puppet does not execute).
 public test_clcmd_menu()
 {
 	SpawnPuppets("pcl", 2, "Clcmd_Spawned")
@@ -871,6 +964,10 @@ public Clcmd_Spawned()
 
 	new before = bench_msg_count(admin, "ShowMenu")
 	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
+	new cmd[32]
+	formatex(cmd, charsmax(cmd), "amx_slay #%d", get_user_userid(target))
+	ASSERT_MSG(admin, "stufftext", cmd)
+	ASSERT_EQ(bench_msg_count(target, "stufftext"), 0)
 	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before + 1)
 	ASSERT_MENU(admin, "^n8. Slay player^n")
 
@@ -878,8 +975,10 @@ public Clcmd_Spawned()
 	new key = PosOf(target)
 	KickPuppet(target)
 	before = bench_msg_count(admin, "ShowMenu")
+	new stuffed = bench_msg_count(admin, "stufftext")
 	bench_puppet_cmd(admin, "menuselect %d", key)
 	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before + 1)
+	ASSERT_EQ(bench_msg_count(admin, "stufftext"), stuffed)
 
 	// "Kick player" has no "d": the menu closes.
 	bench_puppet_cmd(admin, "menuselect 8")
@@ -888,6 +987,8 @@ public Clcmd_Spawned()
 	ASSERT_MENU(admin, "^n8. Kick player^n")
 	before = bench_msg_count(admin, "ShowMenu")
 	bench_puppet_cmd(admin, "menuselect %d", PosOf(admin))
+	formatex(cmd, charsmax(cmd), "amx_kick #%d", get_user_userid(admin))
+	ASSERT_MSG(admin, "stufftext", cmd)
 	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before)
 	ASSERT(MenuClosed(admin))
 	bench_pass()
@@ -948,5 +1049,101 @@ public ClcmdNone_Spawned()
 	new before = bench_msg_count(admin, "ShowMenu")
 	bench_puppet_cmd(admin, "menuselect 8")
 	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before)
+	bench_pass()
+}
+
+// clcmds.ini as fixtures/plmenu_clcmds.ini has it, read on a new map: "a" runs the command from the
+// server console, "b" on the admin's, "c" on the player's, each with %userid% and %authid% filled
+// in and \' turned into a quote; "d" brings the menu back. An entry needing "l" is left out. Then a
+// map without clcmds.ini, where the menu has no commands, and back to the server's own.
+public test_clcmds_ini()
+{
+	bench_set_timeout(180.0)
+	SwapConfig(g_ClcmdsFile, "plmenu_clcmds.ini")
+	bench_change_map("", "ClcmdsIni_Map")
+}
+
+public ClcmdsIni_Map()
+{
+	SpawnPuppets("pci", 2, "ClcmdsIni_Spawned")
+}
+
+public ClcmdsIni_Spawned()
+{
+	new admin = g_P[0], target = g_P[1]
+	new authid[44], text[96]
+	get_user_authid(target, authid, charsmax(authid))
+	SetFlags(admin, "mu")
+	bench_puppet_cmd(admin, "amx_clcmdmenu")
+	ASSERT_MENU(admin, "^n8. Server echo^n")
+
+	// "ad": the server runs it, and the menu comes back.
+	new before = bench_msg_count(admin, "ShowMenu")
+	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
+	formatex(text, charsmax(text), "bench_clcmd #%d", get_user_userid(target))
+	ASSERT_MSG(0, "server", text)
+	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before + 1)
+	ASSERT_EQ(bench_msg_count(admin, "stufftext"), 0)
+
+	// "b": on the admin's console; the menu closes.
+	bench_puppet_cmd(admin, "menuselect 8")
+	ASSERT_MENU(admin, "^n8. Admin echo^n")
+	before = bench_msg_count(admin, "ShowMenu")
+	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
+	formatex(text, charsmax(text), "echo bench_admin %s", authid)
+	ASSERT_MSG(admin, "stufftext", text)
+	ASSERT_EQ(bench_msg_count(target, "stufftext"), 0)
+	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before)
+	ASSERT(MenuClosed(admin))
+
+	// "cd": on the player's console, quoted; the menu comes back.
+	bench_puppet_cmd(admin, "amx_clcmdmenu")
+	bench_puppet_cmd(admin, "menuselect 8")
+	bench_puppet_cmd(admin, "menuselect 8")
+	ASSERT_MENU(admin, "^n8. Player echo^n")
+	before = bench_msg_count(admin, "ShowMenu")
+	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
+	formatex(text, charsmax(text), "echo ^"bench_player %s^"", authid)
+	ASSERT_MSG(target, "stufftext", text)
+	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before + 1)
+
+	// Three entries for "u": the fourth press is the first again.
+	bench_puppet_cmd(admin, "menuselect 8")
+	ASSERT_MENU(admin, "^n8. Server echo^n")
+	ASSERT_EQ(bench_msg_count(0, "server", "bench_rcon"), 0)
+
+	SwapConfig(g_ClcmdsFile, "")
+	bench_change_map("", "ClcmdsNone_Map")
+}
+
+public ClcmdsNone_Map()
+{
+	SpawnPuppets("pcz", 2, "ClcmdsNone_Spawned")
+}
+
+public ClcmdsNone_Spawned()
+{
+	new admin = g_P[0], target = g_P[1]
+	SetFlags(admin, "mu")
+	bench_puppet_cmd(admin, "amx_clcmdmenu")
+	ASSERT_MENU(admin, "#. pcz2^n")
+	ASSERT_MENU(admin, "^n8. No cmds available^n")
+	ASSERT_FALSE(KeyEnabled(admin, PosOf(target)))
+
+	RestoreConfig(g_ClcmdsFile)
+	bench_change_map("", "ClcmdsBack_Map")
+}
+
+public ClcmdsBack_Map()
+{
+	SpawnPuppets("pcb", 1, "ClcmdsBack_Spawned")
+}
+
+public ClcmdsBack_Spawned()
+{
+	new admin = g_P[0]
+	SetFlags(admin, "mu")
+	bench_puppet_cmd(admin, "amx_clcmdmenu")
+	ASSERT_MENU(admin, "^n8. Kick player^n")
 	bench_pass()
 }

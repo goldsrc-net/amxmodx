@@ -9,8 +9,8 @@
 
 //
 // Tests for adminvote.sma (Admin Votes): amx_votemap, amx_votekick, amx_voteban, amx_vote and
-// amx_cancelvote. Puppets answer the vote menus with menuselect. A map vote that passes is always
-// refused at the result menu: accepting it runs "changelevel", which would end the run. Every
+// amx_cancelvote. Puppets answer the vote menus with menuselect. One map vote is accepted and
+// really changes the level (to the same map); the others are refused at the result menu. Every
 // test puts the vote cvars back and drops a vote still pending.
 //
 
@@ -52,9 +52,19 @@ public bench_teardown()
 {
 	remove_task(TASK_CHECKVOTES, 1)
 	remove_task(TASK_AUTOREFUSE, 1)
+	RestoreCvars()
+	set_cvar_float("amx_last_voting", 0.0)
+}
+
+// Puts the vote cvars back once. A test that changes the map calls it first: the copy of this
+// file on the new map has no saved values.
+RestoreCvars()
+{
+	if (!g_Saved[0][0])
+		return
 	for (new i = 0; i < sizeof(g_Cvars); i++)
 		set_cvar_string(g_Cvars[i], g_Saved[i])
-	set_cvar_float("amx_last_voting", 0.0)
+	g_Saved[0][0] = 0
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -348,6 +358,48 @@ public MapVote_Result(caller)
 	bench_puppet_cmd(caller, "menuselect 2")
 	ASSERT_MSG(caller, "", "Result refused")
 	ASSERT_FALSE(task_exists(TASK_AUTOREFUSE, 1))
+	bench_pass()
+}
+
+// Accepting the result runs "changelevel <map>" two seconds later.
+public test_votemap_accepted_changes_map()
+{
+	bench_set_timeout(120.0)
+	ASSERT(AddPuppet("acceptcaller") > 0)
+	ASSERT(AddPuppet("acceptvoter") > 0)
+	WaitForPuppets("Accept_Ready")
+}
+
+public Accept_Ready()
+{
+	new caller = g_P[0], voter = g_P[1], map[32]
+	get_mapname(map, charsmax(map))
+	SetAccess(caller, ADMIN_VOTE)
+	bench_puppet_cmd(caller, "amx_votemap %s", map)
+	bench_puppet_cmd(voter, "menuselect 1")
+	bench_wait_message(caller, "ShowMenu", "The result: changelevel", "Accept_Result", 10.0)
+}
+
+public Accept_Result(caller)
+{
+	new map[32], text[64]
+	get_mapname(map, charsmax(map))
+	formatex(text, charsmax(text), "The result: changelevel %s", map)
+	ASSERT_MENU(caller, text)
+	RestoreCvars()
+	bench_expect_map_change("Accept_Changed")
+	bench_puppet_cmd(caller, "menuselect 1")
+	ASSERT_MSG(caller, "", "Result accepted")
+	ASSERT_FALSE(task_exists(TASK_AUTOREFUSE, 1))
+	// Not at once: the change is a task.
+	ASSERT(is_user_connected(g_P[1]))
+}
+
+public Accept_Changed()
+{
+	// A new map: game time starts again. The vote set amx_last_voting on the old map.
+	ASSERT(get_gametime() < 10.0)
+	set_cvar_float("amx_last_voting", 0.0)
 	bench_pass()
 }
 

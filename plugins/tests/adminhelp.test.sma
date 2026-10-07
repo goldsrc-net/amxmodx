@@ -231,14 +231,42 @@ public search_pages()
 
 public test_server_console_help()
 {
-	// The server console may ask for any number of entries; its output goes to the server
-	// console, which tests cannot read, so this only checks the command runs.
+	set_cvar_num("amx_help_amount_per_page", 10)
+	new count = HelpCount(0), first[32], fourth[32]
+	ASSERT(count > 12)
+	HelpCommand(0, 0, first, charsmax(first))
+	HelpCommand(0, 3, fourth, charsmax(fourth))
+
+	// The server console may ask for any number of entries.
 	server_cmd("amx_help 1 3")
 	server_exec()
+	ASSERT_MSG(0, "server", "----- AMX Mod X Help: Commands -----")
+	ASSERT_MSG(0, "server", fmt("  1: %s ", first))
+	ASSERT_EQ(bench_msg_count(0, "server", fmt("  4: %s ", fourth)), 0)
+	ASSERT_MSG(0, "server", fmt("----- Entries 1 - 3 of %d -----", count))
+	ASSERT_MSG(0, "server", "----- Use 'amx_help 4' for more -----")
+
+	// No amount: the per-page amount.
 	server_cmd("amx_help 2 0")
 	server_exec()
+	ASSERT_MSG(0, "server", fmt("----- Entries 2 - 11 of %d -----", count))
+
+	// Searches too.
+	new flags = get_user_flags(0), matches
+	new command[32], cmdflags, info[2], bool:info_ml
+	if (flags > 0 && !(flags & ADMIN_USER))
+		flags |= ADMIN_ADMIN
+	for (new i = 0; i < count; i++)
+	{
+		get_concmd(i, command, charsmax(command), cmdflags, info, charsmax(info), flags, 0, info_ml)
+		if (containi(command, "amx_") != -1)
+			matches++
+	}
+	ASSERT(matches > 2)
 	server_cmd("amx_searchcmd amx_ 1 2")
 	server_exec()
+	ASSERT_MSG(0, "server", fmt("----- Entries 1 - 2 of %d -----", matches))
+	ASSERT_MSG(0, "server", "----- Use 'amx_searchcmd amx_ 3' for more -----")
 	bench_pass()
 }
 

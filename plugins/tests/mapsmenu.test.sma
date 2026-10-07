@@ -11,7 +11,9 @@
 // Tests for mapsmenu.sma (Maps Menu): the changelevel menu (amx_mapmenu) and the votemap menu
 // (amx_votemapmenu), answered by puppets with menuselect. The map change the plugin asks for is
 // blocked here in server_changelevel and recorded, so the tests can check which map it asked
-// for without ending the run. The map list is read the way the plugin reads it.
+// for without ending the run. The map list is read the way the plugin reads it. One test gives
+// the plugin other map lists to read at load (a maps.ini of its own, then none at all) by
+// changing the map, and puts the files back.
 //
 
 #include <amxmodx>
@@ -33,7 +35,11 @@ new g_MapCount
 new g_P[4]
 new g_PuppetCount
 new g_ChangeMap[32]
+new bool:g_Blocking
 new g_CallerUserId
+
+// A file a test moves aside is kept as <file>.bench; the marker stands for a file that was not there.
+#define NO_FILE_MARKER	"; amxxbench: there was no such file"
 
 public plugin_init()
 {
@@ -46,15 +52,20 @@ public plugin_init()
 	LoadMaps()
 }
 
-// Every map change asked for while these tests are loaded is blocked: one would end the run.
+// Every map change a plugin asks for during these tests is blocked: one would end the run. Other
+// files' tests are left alone.
 public server_changelevel(map[])
 {
+	if (!g_Blocking)
+		return PLUGIN_CONTINUE
 	copy(g_ChangeMap, charsmax(g_ChangeMap), map)
 	return PLUGIN_HANDLED
 }
 
 public bench_setup()
 {
+	// Files left moved aside by a run that stopped before it put them back.
+	RestoreMapFiles()
 	for (new i = 0; i < sizeof(g_Cvars); i++)
 		get_cvar_string(g_Cvars[i], g_Saved[i], charsmax(g_Saved[]))
 	// A vote lasts amx_vote_time + 2 seconds.
@@ -63,16 +74,78 @@ public bench_setup()
 	set_cvar_float("amx_last_voting", 0.0)
 	g_PuppetCount = 0
 	g_ChangeMap[0] = 0
+	g_Blocking = true
 }
 
 public bench_teardown()
 {
+	g_Blocking = false
 	for (new i = 1; i <= MAX_PLAYERS; i++)
 		remove_task(TASK_CHECKVOTES + i, 1)
 	remove_task(TASK_AUTOREFUSE, 1)
+	RestoreCvars()
+	set_cvar_float("amx_last_voting", 0.0)
+	RestoreMapFiles()
+}
+
+// Puts the vote cvars back once. A test that changes the map calls it first: the copy of this
+// file on the new map has no saved values.
+RestoreCvars()
+{
+	if (!g_Saved[0][0])
+		return
 	for (new i = 0; i < sizeof(g_Cvars); i++)
 		set_cvar_string(g_Cvars[i], g_Saved[i])
-	set_cvar_float("amx_last_voting", 0.0)
+	g_Saved[0][0] = 0
+}
+
+// configs/maps.ini, and the map cycle (mapcyclefile, which is mapcycle.txt here).
+MapsIni(path[], len)
+{
+	get_configsdir(path, len)
+	add(path, len, "/maps.ini")
+}
+
+MapCycle(path[], len)
+{
+	get_cvar_string("mapcyclefile", path, len)
+}
+
+// Moves file aside as <file>.bench (a marker if there is none), unless it already is.
+MoveAside(const file[])
+{
+	new saved[PLATFORM_MAX_PATH]
+	formatex(saved, charsmax(saved), "%s.bench", file)
+	if (file_exists(saved))
+		return
+	if (file_exists(file))
+		rename_file(file, saved, 1)
+	else
+		write_file(saved, NO_FILE_MARKER)
+}
+
+// Puts back a file moved aside, dropping whatever a test left in its place.
+PutBack(const file[])
+{
+	new saved[PLATFORM_MAX_PATH], line[64], len
+	formatex(saved, charsmax(saved), "%s.bench", file)
+	if (!file_exists(saved))
+		return
+	delete_file(file)
+	read_file(saved, 0, line, charsmax(line), len)
+	if (equal(line, NO_FILE_MARKER))
+		delete_file(saved)
+	else
+		rename_file(saved, file, 1)
+}
+
+RestoreMapFiles()
+{
+	new path[PLATFORM_MAX_PATH]
+	MapsIni(path, charsmax(path))
+	PutBack(path)
+	MapCycle(path, charsmax(path))
+	PutBack(path)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -116,9 +189,9 @@ Pages(perPage)
 	return g_MapCount / perPage + ((g_MapCount % perPage) ? 1 : 0)
 }
 
-AddPuppet(const name[])
+AddPuppet(const name[], bool:bot = false)
 {
-	new id = bench_puppet(name)
+	new id = bench_puppet(name, bot)
 	if (id > 0)
 		g_P[g_PuppetCount++] = id
 	return id
@@ -137,7 +210,7 @@ public PuppetsReady()
 		new id = g_P[i]
 		if (!is_user_connected(id))
 			ready = false
-		else if (!is_user_alive(id))
+		else if (!is_user_bot(id) && !is_user_alive(id))
 		{
 			engclient_cmd(id, "respawn")
 			ready = false
@@ -471,6 +544,38 @@ public Leave_Changed()
 	bench_pass()
 }
 
+// The votes are counted the same when only bots are left (checkVotes counts at least one player).
+public test_votemap_with_only_a_bot_left()
+{
+	ASSERT(g_MapCount > 4)
+	ASSERT(AddPuppet("botcaller") > 0)
+	ASSERT(AddPuppet("benchbot", true) > 0)
+	WaitForPuppets("Bot_Ready")
+}
+
+public Bot_Ready()
+{
+	new caller = g_P[0], bot = g_P[1]
+	SetAccess(caller, ADMIN_VOTE)
+	bench_puppet_cmd(caller, "amx_votemapmenu")
+	bench_puppet_cmd(caller, "menuselect 5")
+	bench_puppet_cmd(caller, "menuselect 8")
+	ASSERT_EQ(MenuKeys(bot), MENU_KEY_1|MENU_KEY_2)
+	// Chat is not sent to bots, so only the result shows the vote counted.
+	bench_puppet_cmd(bot, "menuselect 1")
+	ASSERT_MSG(caller, "", "benchbot voted for option #1")
+	server_cmd("kick #%d", get_user_userid(caller))
+	server_exec()
+	ASSERT_EQ(get_playersnum(), 1)
+	bench_wait_until("MapChangeAsked", "Bot_Changed", 15.0)
+}
+
+public Bot_Changed()
+{
+	ASSERT_STR_EQ(g_ChangeMap, g_Maps[4])
+	bench_pass()
+}
+
 public test_votemap_fails_without_votes()
 {
 	ASSERT(AddPuppet("lonevoter") > 0)
@@ -552,5 +657,88 @@ public Busy_Ready()
 	bench_puppet_cmd(id, "menuselect 8")
 	ASSERT_MSG(id, "", "Voting not allowed at this time")
 	ASSERT_FALSE(task_exists(TASK_CHECKVOTES + id, 1))
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The map list, read once when the plugin loads
+
+// The plugin's own maps.ini: comments, blank lines, names too short to end in ".bsp" and maps
+// that do not exist are skipped, and a ".bsp" ending is cut off. Then no maps.ini and no map
+// cycle: both menus say there are no maps. The files are put back and the map changed once more,
+// so the tests after this one see the usual list.
+public test_map_list_read_at_load()
+{
+	bench_set_timeout(180.0)
+	ASSERT(is_map_valid("ts_lobby"))
+	new path[PLATFORM_MAX_PATH]
+	MapsIni(path, charsmax(path))
+	MoveAside(path)
+	write_file(path, "; Maps for mapsmenu.test.sma")
+	write_file(path, "")
+	write_file(path, "ab")
+	write_file(path, "ts_lobby.bsp")
+	write_file(path, "bench_nosuch.bsp")
+	write_file(path, "bench_nosuch")
+	write_file(path, "ts_lobby")
+	RestoreCvars()
+	bench_change_map("", "OwnList_Loaded")
+}
+
+public OwnList_Loaded()
+{
+	ASSERT(AddPuppet("listreader") > 0)
+	WaitForPuppets("OwnList_Ready")
+}
+
+public OwnList_Ready()
+{
+	new id = g_P[0]
+	SetAccess(id, ADMIN_MAP|ADMIN_VOTE)
+	bench_puppet_cmd(id, "amx_mapmenu")
+	ASSERT_MENU(id, "Changelevel Menu 1/1^n^n1. ts_lobby^n2. ts_lobby^n^n0. Exit")
+	ASSERT_EQ(MenuKeys(id), MENU_KEY_1|MENU_KEY_2|MENU_KEY_0)
+	bench_puppet_cmd(id, "menuselect 10")
+	bench_puppet_cmd(id, "amx_votemapmenu")
+	ASSERT_MENU(id, "Votemap Menu 1/1^n^n1. ts_lobby^n2. ts_lobby^n^n#. Start Voting")
+	bench_puppet_cmd(id, "menuselect 10")
+
+	// No maps.ini, and no map cycle either.
+	new path[PLATFORM_MAX_PATH]
+	MapsIni(path, charsmax(path))
+	delete_file(path)
+	MapCycle(path, charsmax(path))
+	ASSERT_STR_EQ(path, "mapcycle.txt")
+	MoveAside(path)
+	ASSERT_FALSE(file_exists(path))
+	bench_change_map("", "NoList_Loaded")
+}
+
+public NoList_Loaded()
+{
+	ASSERT(AddPuppet("nolistreader") > 0)
+	WaitForPuppets("NoList_Ready")
+}
+
+public NoList_Ready()
+{
+	new id = g_P[0]
+	SetAccess(id, ADMIN_MAP|ADMIN_VOTE)
+	new menus = bench_msg_count(id, "ShowMenu")
+	bench_puppet_cmd(id, "amx_mapmenu")
+	bench_puppet_cmd(id, "amx_votemapmenu")
+	// Each command tells the console and the chat, and opens no menu.
+	ASSERT_EQ(bench_msg_count(id, "", "There are no maps in menu"), 4)
+	ASSERT_EQ(bench_msg_count(id, "ShowMenu"), menus)
+
+	RestoreMapFiles()
+	ASSERT(file_exists("mapcycle.txt"))
+	bench_change_map("", "Restored_Loaded")
+}
+
+public Restored_Loaded()
+{
+	// This copy of the file read the usual list again in its plugin_init.
+	ASSERT(g_MapCount > 8)
 	bench_pass()
 }

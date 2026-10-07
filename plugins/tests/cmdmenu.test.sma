@@ -14,6 +14,12 @@
 // opens each menu and answers it with menuselect. The cvars the menus change are put back after
 // every test.
 //
+// The config files test installs its own cmds.ini, speech.ini and cvars.ini (fixtures/cmdmenu_*)
+// and takes configs.ini away, changes the map for them, then takes speech.ini and cvars.ini away
+// for a second map. It keeps the server's own files as ".bench" copies (or a ".bench-none" marker
+// when there was none), which also tell a later run that an interrupted one left its files there;
+// they are put back, and the map changed once more.
+//
 
 #include <amxmodx>
 #include <amxmisc>
@@ -21,6 +27,9 @@
 
 new const g_Cvars[][] = { "mp_timelimit", "sv_password", "pausable", "sv_voiceenable", "mp_chattime", "mp_logmessages" }
 new g_Saved[sizeof(g_Cvars)][32]
+new bool:g_HaveSaved
+
+new const g_Configs[][] = { "cmds.ini", "configs.ini", "speech.ini", "cvars.ini" }
 
 new g_P[MAX_PLAYERS + 1]
 new g_PNum
@@ -31,18 +40,34 @@ public plugin_init()
 
 	bench_coverage_ignore("cmdmenu.sma", 254, 254, "colored menus, which AMX Mod X turns off for ts")
 	bench_coverage_ignore("cmdmenu.sma", 449, 449, "colored menus, which AMX Mod X turns off for ts")
+
+	// The cvars fixtures/cmdmenu_cvars.ini lists.
+	new name[32]
+	for (new i = 1; i <= 9; i++)
+	{
+		formatex(name, charsmax(name), "bench_cvarmenu%d", i)
+		register_cvar(name, "a")
+	}
 }
 
 public bench_setup()
 {
 	for (new i = 0; i < sizeof(g_Cvars); i++)
 		get_cvar_string(g_Cvars[i], g_Saved[i], charsmax(g_Saved[]))
+	g_HaveSaved = true
+	// Left by a run that stopped before teardown: the files there now are that run's.
+	RestoreConfigs()
 }
 
 public bench_teardown()
 {
-	for (new i = 0; i < sizeof(g_Cvars); i++)
-		set_cvar_string(g_Cvars[i], g_Saved[i])
+	// After a map change this file starts over, with nothing saved; that test changes no cvars.
+	if (g_HaveSaved)
+	{
+		for (new i = 0; i < sizeof(g_Cvars); i++)
+			set_cvar_string(g_Cvars[i], g_Saved[i])
+	}
+	RestoreConfigs()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -124,6 +149,62 @@ bool:MenuClosed(id)
 	return oldmenu <= 0
 }
 
+ConfigPath(const file[], suffix[], path[], len)
+{
+	get_configsdir(path, len)
+	return format(path, len, "%s/%s%s", path, file, suffix)
+}
+
+// Puts fixture (empty: no file at all) in place of configs/file, keeping the server's own as
+// file.bench, or a file.bench-none marker when it has none. A second call keeps the first's copy.
+SwapConfig(const file[], const fixture[])
+{
+	new path[PLATFORM_MAX_PATH], saved[PLATFORM_MAX_PATH], none[PLATFORM_MAX_PATH]
+	ConfigPath(file, "", path, charsmax(path))
+	ConfigPath(file, ".bench", saved, charsmax(saved))
+	ConfigPath(file, ".bench-none", none, charsmax(none))
+	if (!file_exists(saved) && !file_exists(none))
+	{
+		if (file_exists(path))
+			rename_file(path, saved, 1)
+		else
+			fclose(fopen(none, "wt"))
+	}
+	delete_file(path)
+	if (fixture[0])
+	{
+		new from[PLATFORM_MAX_PATH], line[256]
+		bench_fixture(fixture, from, charsmax(from))
+		new in = fopen(from, "rt"), out = fopen(path, "wt")
+		while (fgets(in, line, charsmax(line)))
+			fputs(out, line)
+		fclose(in)
+		fclose(out)
+	}
+}
+
+// Puts the server's own files back after SwapConfig.
+RestoreConfigs()
+{
+	new path[PLATFORM_MAX_PATH], saved[PLATFORM_MAX_PATH], none[PLATFORM_MAX_PATH]
+	for (new i = 0; i < sizeof(g_Configs); i++)
+	{
+		ConfigPath(g_Configs[i], "", path, charsmax(path))
+		ConfigPath(g_Configs[i], ".bench", saved, charsmax(saved))
+		ConfigPath(g_Configs[i], ".bench-none", none, charsmax(none))
+		if (file_exists(saved))
+		{
+			delete_file(path)
+			rename_file(saved, path, 1)
+		}
+		else if (file_exists(none))
+		{
+			delete_file(path)
+			delete_file(none)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tests
 
@@ -165,10 +246,12 @@ public Commands_Spawned()
 	// "d": the menu comes back.
 	ASSERT_EQ(bench_msg_count(id, "ShowMenu"), before + 1)
 	ASSERT_MENU(id, "Commands Menu 1/1")
-	// "a": amx_pause runs from the server console (admincmd turns pausable on for it).
+	// "a": amx_pause runs from the server console (admincmd turns pausable on for it and has the
+	// player's client pause the game).
 	server_exec()
 	ASSERT_EQ(get_cvar_num("pausable"), 1)
 	ASSERT_MSG(id, "", "pause server")
+	ASSERT_MSG(id, "stufftext", "pause;pauseAck")
 	bench_pass()
 }
 
@@ -220,6 +303,7 @@ public Speech_Spawned()
 	// Picking an entry sends it to every client and shows the same page again.
 	new before = bench_msg_count(id, "ShowMenu")
 	bench_puppet_cmd(id, "menuselect 2")
+	ASSERT_MSG(id, "stufftext", "spk ^"vox/hello and die^"")
 	ASSERT(bench_msg_count(id, "ShowMenu") > before)
 	ASSERT_MENU(id, "1. Man that sounded bad^n")
 
@@ -232,8 +316,8 @@ public Speech_Spawned()
 	bench_pass()
 }
 
-// 21 entries make three pages, so the title should read 1/3. cmdmenu.sma:238 adds the remainder
-// (21 % 8 = 5) instead of one page for it and shows 1/7.
+// 21 entries make three pages: the title reads 1/3 (once 1/7, the remainder 21 % 8 = 5 added
+// instead of one page for it).
 public test_speech_menu_page_count()
 {
 	SpawnPuppets("cspc", 1, "SpeechCount_Spawned")
@@ -300,5 +384,121 @@ public CvarsEmpty_Spawned()
 	bench_puppet_cmd(id, "amx_cvarmenu")
 	ASSERT_MENU(id, "Cvars Menu 1/0^n^n^n0. Exit")
 	ASSERT_EQ(MenuKeys(id), MENU_KEY_0)
+	bench_pass()
+}
+
+// The config files on a new map. cmds.ini: a separator ("-", not a key), "bd" on the admin's
+// console and back to the menu, "c" on every client's, "a" from the server console, and an entry
+// needing "l" left out. No configs.ini: an empty menu. speech.ini: vox, mp3, a leading slash and
+// custom wavs, which plugin_precache precaches when the file exists. cvars.ini: nine cvars, so a
+// second page. Then a map without speech.ini and cvars.ini, and back to the server's own files.
+public test_config_files()
+{
+	bench_set_timeout(180.0)
+	SwapConfig("cmds.ini", "cmdmenu_cmds.ini")
+	SwapConfig("configs.ini", "")
+	SwapConfig("speech.ini", "cmdmenu_speech.ini")
+	SwapConfig("cvars.ini", "cmdmenu_cvars.ini")
+	bench_change_map("", "Configs_Map")
+}
+
+public Configs_Map()
+{
+	SpawnPuppets("cini", 2, "ConfigsCmds_Spawned")
+}
+
+public ConfigsCmds_Spawned()
+{
+	new id = g_P[0], other = g_P[1]
+	SetFlags(id, "u")
+	bench_puppet_cmd(id, "amx_cmdmenu")
+	ASSERT_MENU(id, "Commands Menu 1/1^n^n-----^n2. Admin echo^n3. All echo^n4. Server echo^n^n0. Exit")
+	ASSERT_EQ(MenuKeys(id), MENU_KEY_2|MENU_KEY_3|MENU_KEY_4|MENU_KEY_0)
+
+	// "bd": the admin's console only, then the menu again.
+	new before = bench_msg_count(id, "ShowMenu")
+	bench_puppet_cmd(id, "menuselect 2")
+	ASSERT_MSG(id, "stufftext", "echo bench_admin")
+	ASSERT_EQ(bench_msg_count(other, "stufftext"), 0)
+	ASSERT_EQ(bench_msg_count(id, "ShowMenu"), before + 1)
+
+	// "c": every client's console; the menu closes.
+	before = bench_msg_count(id, "ShowMenu")
+	bench_puppet_cmd(id, "menuselect 3")
+	ASSERT_MSG(id, "stufftext", "echo bench_all")
+	ASSERT_MSG(other, "stufftext", "echo bench_all")
+	ASSERT_EQ(bench_msg_count(id, "ShowMenu"), before)
+	ASSERT(MenuClosed(id))
+
+	// "a": the server console.
+	bench_puppet_cmd(id, "amx_cmdmenu")
+	bench_puppet_cmd(id, "menuselect 4")
+	server_exec()
+	ASSERT_MSG(0, "server", "bench_server")
+	ASSERT_EQ(bench_msg_count(id, "stufftext", "bench_server"), 0)
+
+	// No configs.ini.
+	bench_puppet_cmd(id, "amx_cfgmenu")
+	ASSERT_MENU(id, "Configs Menu 1/1^n^n^n0. Exit")
+
+	// speech.ini: every entry with four fields is listed, whatever its sound.
+	bench_puppet_cmd(id, "amx_speechmenu")
+	ASSERT_MENU(id, "Speech Menu 1/1^n^n1. Vox^n2. Mp3^n3. Mp3 loop^n4. Slash^n5. Wav^n6. Missing^n7. Say^n^n0. Exit")
+	bench_puppet_cmd(id, "menuselect 4")
+	ASSERT_MSG(other, "stufftext", "spk ^"/debris/bustcrate1^"")
+
+	// cvars.ini: eight cvars on the first page, the ninth on the second.
+	SetFlags(id, "gu")
+	bench_puppet_cmd(id, "amx_cvarmenu")
+	ASSERT_MENU(id, "Cvars Menu 1/2^n^n1. bench_cvarmenu1    a^n")
+	ASSERT_MENU(id, "8. bench_cvarmenu8    a^n^n9. More...^n0. Exit")
+	ASSERT_EQ(MenuKeys(id), 0x3FF)
+	bench_puppet_cmd(id, "menuselect 9")
+	ASSERT_MENU(id, "Cvars Menu 2/2^n^n1. bench_cvarmenu9    a^n^n0. Back")
+	bench_puppet_cmd(id, "menuselect 1")
+	ASSERT_MENU(id, "Cvars Menu 2/2^n^n1. bench_cvarmenu9    b^n")
+	bench_puppet_cmd(id, "menuselect 1")
+	ASSERT_MENU(id, "1. bench_cvarmenu9    a^n")
+	bench_puppet_cmd(id, "menuselect 10")
+	ASSERT_MENU(id, "Cvars Menu 1/2^n")
+
+	SwapConfig("speech.ini", "")
+	SwapConfig("cvars.ini", "")
+	bench_change_map("", "ConfigsNone_Map")
+}
+
+public ConfigsNone_Map()
+{
+	SpawnPuppets("cnone", 1, "ConfigsNone_Spawned")
+}
+
+public ConfigsNone_Spawned()
+{
+	new id = g_P[0]
+	SetFlags(id, "gu")
+	bench_puppet_cmd(id, "amx_speechmenu")
+	ASSERT_MENU(id, "Speech Menu 1/1^n^n^n0. Exit")
+	bench_puppet_cmd(id, "amx_cvarmenu")
+	ASSERT_MENU(id, "Cvars Menu 1/0^n^n^n0. Exit")
+
+	RestoreConfigs()
+	bench_change_map("", "ConfigsBack_Map")
+}
+
+public ConfigsBack_Map()
+{
+	SpawnPuppets("cback", 1, "ConfigsBack_Spawned")
+}
+
+public ConfigsBack_Spawned()
+{
+	new id = g_P[0]
+	SetFlags(id, "gu")
+	bench_puppet_cmd(id, "amx_cmdmenu")
+	ASSERT_MENU(id, "Commands Menu 1/1^n^n1. Pause^n")
+	bench_puppet_cmd(id, "amx_speechmenu")
+	ASSERT_MENU(id, "Speech Menu 1/3^n")
+	bench_puppet_cmd(id, "amx_cvarmenu")
+	ASSERT_MENU(id, "Cvars Menu 1/1^n^n1. mp_timelimit")
 	bench_pass()
 }

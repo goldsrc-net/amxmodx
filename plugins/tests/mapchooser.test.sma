@@ -13,10 +13,14 @@
 // tests make that every 0.1 second and put it back. The vote only sets amx_nextmap or extends
 // mp_timelimit, it never changes the map. The Specialists has no mp_winlimit or mp_maxrounds, so
 // this file registers both (at 0, the value the plugin reads when they are missing). mp_timelimit,
-// mp_winlimit, mp_maxrounds, amx_nextmap and amx_vote_answers are put back after each test.
+// mp_winlimit, mp_maxrounds, amx_nextmap and amx_vote_answers are put back after each test. Two
+// tests change the map to load the plugin with another maps.ini, or with none and no map cycle;
+// they put configs/maps.ini and mapcyclefile back (a copy left by an interrupted run,
+// maps.ini.bench, is put back first) and change the map again.
 //
 
 #include <amxmodx>
+#include <amxmisc>
 #include <amxxbench>
 
 #define TASK_VOTE 987456
@@ -31,6 +35,12 @@ new g_Qualify[16]
 new g_Map[32]
 new g_Step[32]
 new Float:g_TimeLimitBefore
+new bool:g_SetupRan
+new g_MapsIni[PLATFORM_MAX_PATH]
+new g_MapsIniSaved[PLATFORM_MAX_PATH]
+
+// Where the tests that change mapcyclefile keep its value across the map change.
+new const MAPCYCLE_KEY[] = "bench_mapcyclefile"
 
 public plugin_init()
 {
@@ -40,6 +50,27 @@ public plugin_init()
 
 	bench_coverage_ignore("mapchooser.sma", 47, 47, "the TeamScore event is only registered under Counter-Strike")
 	bench_coverage_ignore("mapchooser.sma", 275, 281, "team_score handles TeamScore, only registered under Counter-Strike")
+
+	get_configsdir(g_MapsIni, charsmax(g_MapsIni))
+	add(g_MapsIni, charsmax(g_MapsIni), "/maps.ini")
+	formatex(g_MapsIniSaved, charsmax(g_MapsIniSaved), "%s.bench", g_MapsIni)
+}
+
+// Puts back configs/maps.ini and mapcyclefile if a test moved them.
+RestoreMapFiles()
+{
+	if (file_exists(g_MapsIniSaved))
+	{
+		delete_file(g_MapsIni)
+		rename_file(g_MapsIniSaved, g_MapsIni, 1)
+	}
+	new cycle[64]
+	get_localinfo(MAPCYCLE_KEY, cycle, charsmax(cycle))
+	if (cycle[0])
+	{
+		set_cvar_string("mapcyclefile", cycle)
+		set_localinfo(MAPCYCLE_KEY, "")
+	}
 }
 
 public bench_setup()
@@ -50,16 +81,23 @@ public bench_setup()
 	get_cvar_string("amx_nextmap", g_NextMap, charsmax(g_NextMap))
 	g_VoteAnswers = get_cvar_num("amx_vote_answers")
 	g_Puppet = 0
+	g_SetupRan = true
+	RestoreMapFiles()
 }
 
 public bench_teardown()
 {
+	RestoreMapFiles()
+	change_task(TASK_VOTE, 15.0, 1)
+	// After a map change the values saved at setup are gone; the test that changed the map has
+	// put back what it changed.
+	if (!g_SetupRan)
+		return
 	set_cvar_float("mp_timelimit", g_TimeLimit)
 	set_cvar_num("mp_winlimit", g_WinLimit)
 	set_cvar_num("mp_maxrounds", g_MaxRounds)
 	set_cvar_string("amx_nextmap", g_NextMap)
 	set_cvar_num("amx_vote_answers", g_VoteAnswers)
-	change_task(TASK_VOTE, 15.0, 1)
 }
 
 // Starts checking every 0.1 second with nothing near its end, so the plugin forgets any earlier
@@ -145,6 +183,7 @@ public pick_shown()
 	MenuText(text, charsmax(text))
 	ASSERT(contain(text, "7. None") != -1)
 	ASSERT_EQ(contain(text, "Extend map"), -1)
+	ASSERT_MSG(g_Puppet, "stufftext", "spk Gman/Gman_Choose2")
 
 	MenuMap(1, g_Map, charsmax(g_Map))
 	ASSERT(is_map_valid(g_Map))
@@ -337,5 +376,149 @@ public all_finished()
 
 public votes_done()
 {
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// maps.ini is read at load. Maps may be given with ".bsp"; comments, blank lines, maps that do not
+// exist, the map being played and the one played before it are left out.
+
+#define OTHER_MAP "ts_awaken"
+
+public test_maps_ini_on_the_next_map()
+{
+	ASSERT(is_map_valid(OTHER_MAP))
+	ASSERT(rename_file(g_MapsIni, g_MapsIniSaved, 1))
+	new f = fopen(g_MapsIni, "wt")
+	ASSERT(f)
+	fputs(f, "; maps for the vote^n")
+	fputs(f, "ts_lobby^n")
+	fputs(f, "ts_hammertime.bsp^n")
+	fputs(f, "ts_nosuchmap.bsp^n")
+	fputs(f, OTHER_MAP)
+	fputs(f, "^n^n")
+	fputs(f, "ts_central^n")
+	fclose(f)
+	bench_set_timeout(120.0)
+	// From ts_lobby (the last map there) to the other map.
+	bench_change_map(OTHER_MAP, "on_other_map")
+}
+
+public on_other_map()
+{
+	g_Puppet = bench_puppet("othervoter")
+	ASSERT(g_Puppet > 0)
+	ASSERT_EQ(change_task(TASK_VOTE, 0.1, 1), 1)
+	set_cvar_num("mp_winlimit", 2)
+	bench_wait_message(g_Puppet, "ShowMenu", "AMX Choose nextmap:", "other_map_vote", 2.0)
+}
+
+// Twenty votes: with two maps, a quarter of the votes draw the last one twice, and the second draw
+// moves on past the end of the list (mapchooser.sma 177). Sixty miss that about once in 30 million.
+#define OTHER_MAP_VOTES 60
+
+new g_OtherVotes
+
+public other_map_vote()
+{
+	// Two maps and None.
+	ASSERT_EQ(MenuKeys(), MENU_KEY_1|MENU_KEY_2|MENU_KEY_7)
+	new first[32], second[32]
+	MenuMap(1, first, charsmax(first))
+	MenuMap(2, second, charsmax(second))
+	new bool:offered = (equal(first, "ts_hammertime") && equal(second, "ts_central"))
+		|| (equal(first, "ts_central") && equal(second, "ts_hammertime"))
+	if (!bench_check(offered, "ts_hammertime and ts_central offered"))
+		return
+
+	if (++g_OtherVotes < OTHER_MAP_VOTES)
+	{
+		// Far from the end for a moment, so the plugin forgets this vote, then near again.
+		set_cvar_num("mp_winlimit", 10)
+		bench_next("other_map_again", 0.25)
+		return
+	}
+	set_cvar_num("mp_winlimit", 0)
+	change_task(TASK_VOTE, 15.0, 1)
+	RestoreMapFiles()
+	bench_change_map("ts_lobby", "back_on_lobby")
+}
+
+public other_map_again()
+{
+	set_cvar_num("mp_winlimit", 2)
+	bench_wait_until("other_map_menu", "other_map_vote", 2.0)
+}
+
+public other_map_menu()
+{
+	return bench_msg_count(g_Puppet, "ShowMenu", "AMX Choose nextmap:") > g_OtherVotes
+}
+
+public back_on_lobby()
+{
+	new map[32]
+	get_mapname(map, charsmax(map))
+	ASSERT_STR_EQ(map, "ts_lobby")
+	ASSERT(task_exists(TASK_VOTE, 1))
+	bench_pass()
+}
+
+// Without maps.ini the plugin reads mapcyclefile; without either it never starts its check.
+// NextMap reads mapcyclefile too: without it, the next map is the current one, with a warning in
+// the log.
+public test_without_maps_ini_or_map_cycle()
+{
+	new cycle[64]
+	get_cvar_string("mapcyclefile", cycle, charsmax(cycle))
+	ASSERT(cycle[0] != EOS)
+	ASSERT(rename_file(g_MapsIni, g_MapsIniSaved, 1))
+	set_localinfo(MAPCYCLE_KEY, cycle)
+	set_cvar_string("mapcyclefile", "bench_no_such_cycle.txt")
+	bench_set_timeout(120.0)
+	bench_change_map("", "without_map_lists")
+}
+
+public without_map_lists()
+{
+	ASSERT_FALSE(task_exists(TASK_VOTE, 1))
+	new map[32], nextmap[32]
+	get_mapname(map, charsmax(map))
+	get_cvar_string("amx_nextmap", nextmap, charsmax(nextmap))
+	ASSERT_STR_EQ(nextmap, map)
+	// Logged while the map loaded, before this step: in AMX Mod X's log, not among the server
+	// lines this test recorded.
+	ASSERT(LoggedSinceMapChange("[nextmap.amxx] WARNING: Couldn't find a valid map or the file doesn't exist (file ^"bench_no_such_cycle.txt^")"))
+
+	RestoreMapFiles()
+	bench_change_map("", "map_lists_back")
+}
+
+// Whether AMX Mod X's log of today has text after its last "Mapchange" line.
+bool:LoggedSinceMapChange(const text[])
+{
+	new path[PLATFORM_MAX_PATH], name[32], line[512], bool:found = false
+	get_localinfo("amxx_logs", path, charsmax(path))
+	if (!path[0])
+		copy(path, charsmax(path), "addons/amxmodx/logs")
+	get_time("/L%Y%m%d.log", name, charsmax(name))
+	add(path, charsmax(path), name)
+	new f = fopen(path, "rt")
+	if (!f)
+		return false
+	while (fgets(f, line, charsmax(line)))
+	{
+		if (contain(line, "-------- Mapchange to ") != -1)
+			found = false
+		else if (contain(line, text) != -1)
+			found = true
+	}
+	fclose(f)
+	return found
+}
+
+public map_lists_back()
+{
+	ASSERT(task_exists(TASK_VOTE, 1))
 	bench_pass()
 }

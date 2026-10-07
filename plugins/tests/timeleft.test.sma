@@ -76,16 +76,46 @@ bool:StartPuppet(const name[])
 	return bench_check(g_Puppet > 0, "puppet created")
 }
 
+// "say thetime" speaks the time (minutes, then a.m. or p.m.) and prints the date and time.
+bool:SayTheTime(hour, minute, const voice[])
+{
+	bench_set_local_time(hour, minute)
+	bench_puppet_say(g_Puppet, "thetime")
+	new expected[64]
+	formatex(expected, charsmax(expected), "spk ^"fvox/time_is_now %s^"", voice)
+	if (!__bench_msg(g_Puppet, "stufftext", expected))
+		return false
+	get_time("The time:   %m/%d/%Y - %H:%M:", expected, charsmax(expected))
+	return __bench_msg(g_Puppet, "TextMsg", expected)
+}
+
 public test_say_thetime_prints_the_date_and_time()
 {
 	if (!StartPuppet("clockwatcher"))
 		return
 	set_cvar_num("amx_time_voice", 1)
-	bench_puppet_say(g_Puppet, "thetime")
+	// "fourty" is how the word is spelled in num_to_word and in Half-Life's vox sounds.
+	if (!SayTheTime(9, 41, "nine _period fourty one am ")) return
+	bench_pass()
+}
 
-	new expected[64]
-	get_time("The time:   %m/%d/%Y - ", expected, charsmax(expected))
-	ASSERT_MSG(g_Puppet, "TextMsg", expected)
+public test_say_thetime_on_the_hour()
+{
+	if (!StartPuppet("onthehour"))
+		return
+	set_cvar_num("amx_time_voice", 1)
+	// Midnight is twelve a.m., with no minutes.
+	if (!SayTheTime(0, 0, "twelve _period am ")) return
+	if (!SayTheTime(12, 0, "twelve _period pm ")) return
+	bench_pass()
+}
+
+public test_say_thetime_in_the_afternoon()
+{
+	if (!StartPuppet("afternoon"))
+		return
+	set_cvar_num("amx_time_voice", 1)
+	if (!SayTheTime(15, 7, "three _period seven pm ")) return
 	bench_pass()
 }
 
@@ -96,6 +126,7 @@ public test_say_thetime_without_voice()
 	set_cvar_num("amx_time_voice", 0)
 	bench_puppet_say(g_Puppet, "thetime")
 	ASSERT_MSG(g_Puppet, "TextMsg", "The time:")
+	ASSERT_EQ(bench_msg_count(g_Puppet, "stufftext", "spk"), 0)
 	bench_pass()
 }
 
@@ -109,6 +140,10 @@ public test_say_timeleft()
 	new left = get_timeleft(), expected[64]
 	formatex(expected, charsmax(expected), "Time Left:  %d:%02d", left / 60, left % 60)
 	ASSERT_MSG(g_Puppet, "TextMsg", expected)
+	// Spoken to the one who asked: "<minutes> minutes <seconds> seconds remaining".
+	ASSERT_MSG(g_Puppet, "stufftext", "spk ^"vox/")
+	ASSERT_MSG(g_Puppet, "stufftext", " minutes ")
+	ASSERT_MSG(g_Puppet, "stufftext", "remaining ^"")
 	bench_pass()
 }
 
@@ -125,6 +160,7 @@ public test_say_timeleft_over_an_hour()
 	ASSERT(left > 3600)
 	formatex(expected, charsmax(expected), "Time Left:  %d:%02d", left / 60, left % 60)
 	ASSERT_MSG(g_Puppet, "TextMsg", expected)
+	ASSERT_MSG(g_Puppet, "stufftext", "spk ^"vox/two hours ")
 	bench_pass()
 }
 
@@ -135,6 +171,7 @@ public test_say_timeleft_without_voice()
 	set_cvar_num("amx_time_voice", 0)
 	bench_puppet_say(g_Puppet, "timeleft")
 	ASSERT_MSG(g_Puppet, "TextMsg", "Time Left:  ")
+	ASSERT_EQ(bench_msg_count(g_Puppet, "stufftext", "spk"), 0)
 	bench_pass()
 }
 
@@ -184,6 +221,8 @@ public test_time_display_whole_minutes()
 
 public two_minutes()
 {
+	// "b": spoken too, to everyone.
+	ASSERT_MSG(g_Puppet, "stufftext", "spk ^"vox/two minutes remaining ^"")
 	set_cvar_float("mp_timelimit", g_TimeLimit)
 	bench_pass()
 }
@@ -229,8 +268,9 @@ public one_minute_one_second()
 
 public fifty_nine()
 {
-	// "bcd 60" speaks only, so 60 was never shown.
+	// "bcd 60" speaks only, so 60 was never shown, and without "remaining" or "minutes".
 	ASSERT_FALSE(HudSent(g_Puppet, "1 minute"))
+	ASSERT_MSG(g_Puppet, "stufftext", "spk ^"vox/one ^"")
 	// Below 55 seconds it counts every second, on a one second task.
 	WaitHud("54 seconds", "counting")
 }

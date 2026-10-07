@@ -11,7 +11,9 @@
 // Tests for statscfg.sma (Stats Configuration): amx_statscfg on/off/save/load/list and the
 // amx_statscfgmenu menu, driven by an admin puppet. The options are the 21 TS Stats adds in its
 // plugin_cfg. TS Stats' switches and configs/stats.ini are put back after every test (a saved
-// copy, or a marker for "there was none", left by an interrupted run is restored first).
+// copy, or a marker for "there was none", left by an interrupted run is restored first). One
+// test adds options on a map without TS Stats (configs/maps/plugins-<map>.ini, removed as soon
+// as the map has loaded) and changes the map again to get the normal list back.
 //
 
 #include <amxmodx>
@@ -29,52 +31,112 @@ new const g_Vars[OPTIONS][] =
 }
 
 new g_Saved[OPTIONS]
+new bool:g_SetupRan
 new g_StatsFile[PLATFORM_MAX_PATH]
 new g_SavedFile[PLATFORM_MAX_PATH]
 new g_AbsentMarker[PLATFORM_MAX_PATH]
+new g_MapsDir[PLATFORM_MAX_PATH]
+new g_MapPlugins[PLATFORM_MAX_PATH]
 new g_Puppet
+
+// Turned on by the options the tests add to the list.
+public BenchStatsSwitch = 1
+
+new const g_MapPluginsMark[] = "; written by statscfg.test.sma"
 
 public plugin_init()
 {
 	register_plugin("Stats Configuration Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 
-	bench_coverage_ignore("statscfg.sma", 189, 189, "the first page always starts inside the list unless it is empty, and TS Stats always adds 21 options")
-	bench_coverage_ignore("statscfg.sma", 210, 210, "TS Stats always adds 21 options in plugin_cfg on this server, so the list is never empty")
+	get_configsdir(g_StatsFile, charsmax(g_StatsFile))
+	formatex(g_SavedFile, charsmax(g_SavedFile), "%s/stats.ini.bench", g_StatsFile)
+	formatex(g_AbsentMarker, charsmax(g_AbsentMarker), "%s/stats.ini.bench-absent", g_StatsFile)
+	formatex(g_MapsDir, charsmax(g_MapsDir), "%s/maps", g_StatsFile)
+	new map[32]
+	get_mapname(map, charsmax(map))
+	formatex(g_MapPlugins, charsmax(g_MapPlugins), "%s/plugins-%s.ini", g_MapsDir, map)
+	add(g_StatsFile, charsmax(g_StatsFile), "/stats.ini")
+
+	bench_coverage_ignore("statscfg.sma", 95, 95, "write_file only returns 0 after raising a run time error, which stops cmdCfg before this line")
+	bench_coverage_ignore("statscfg.sma", 237, 237, "write_file only returns 0 after raising a run time error, which stops actionCfgMenu before this line")
+	bench_coverage_ignore("statscfg.sma", 262, 262, "write_file only returns 0 after raising a run time error, which stops saveSettings before this line")
+
+	// The list a test wrote for this map has been read by now; a run that stopped before its
+	// teardown leaves it no further than this.
+	RemoveMapPlugins()
 }
 
 public bench_setup()
 {
-	get_configsdir(g_StatsFile, charsmax(g_StatsFile))
-	formatex(g_SavedFile, charsmax(g_SavedFile), "%s/stats.ini.bench", g_StatsFile)
-	formatex(g_AbsentMarker, charsmax(g_AbsentMarker), "%s/stats.ini.bench-absent", g_StatsFile)
-	add(g_StatsFile, charsmax(g_StatsFile), "/stats.ini")
-
 	// A saved copy or marker already there is from a run that stopped before teardown: the file
 	// now in place is that run's, the saved one (or none) is the server's.
 	if (file_exists(g_SavedFile) || file_exists(g_AbsentMarker))
-		delete_file(g_StatsFile)
+		RemoveStatsFile()
 	else if (file_exists(g_StatsFile))
 		rename_file(g_StatsFile, g_SavedFile, 1)
 	else
 		write_file(g_AbsentMarker, "stats.ini did not exist")
+	RemoveMapPlugins()
 
 	for (new i = 0; i < OPTIONS; i++)
 		g_Saved[i] = get_xvar_num(get_xvar_id(g_Vars[i]))
+	g_SetupRan = true
 	g_Puppet = 0
 }
 
 public bench_teardown()
 {
-	for (new i = 0; i < OPTIONS; i++)
-		set_xvar_num(get_xvar_id(g_Vars[i]), g_Saved[i])
+	// After a map change the switches are the freshly loaded ones, and g_Saved is gone.
+	if (g_SetupRan)
+	{
+		for (new i = 0; i < OPTIONS; i++)
+			set_xvar_num(get_xvar_id(g_Vars[i]), g_Saved[i])
+	}
 	// A successful save clears the "modified" mark the menu shows; the file goes away next.
 	server_cmd("amx_statscfg save")
 	server_exec()
+	RestoreStatsFile()
+	RemoveMapPlugins()
+}
 
-	delete_file(g_StatsFile)
+RemoveStatsFile()
+{
+	if (dir_exists(g_StatsFile))
+		rmdir(g_StatsFile)
+	else
+		delete_file(g_StatsFile)
+}
+
+RestoreStatsFile()
+{
+	RemoveStatsFile()
 	if (file_exists(g_SavedFile))
 		rename_file(g_SavedFile, g_StatsFile, 1)
 	delete_file(g_AbsentMarker)
+}
+
+CopyOriginalStatsFile()
+{
+	RemoveStatsFile()
+	if (!file_exists(g_SavedFile))
+		return
+	new in = fopen(g_SavedFile, "rb"), out = fopen(g_StatsFile, "wb"), buffer[256], read
+	while ((read = fread_blocks(in, buffer, sizeof(buffer), BLOCK_CHAR)) > 0)
+		fwrite_blocks(out, buffer, read, BLOCK_CHAR)
+	fclose(in)
+	fclose(out)
+}
+
+// The per-map plugin list a test writes, if it is the one this file wrote (and the maps folder,
+// once empty).
+RemoveMapPlugins()
+{
+	new line[64], len
+	if (file_exists(g_MapPlugins) && read_file(g_MapPlugins, 0, line, charsmax(line), len) && equal(line, g_MapPluginsMark))
+	{
+		delete_file(g_MapPlugins)
+		rmdir(g_MapsDir)
+	}
 }
 
 Option(const name[])
@@ -394,5 +456,105 @@ public test_menu_toggles_and_saves()
 	// And off again.
 	bench_puppet_cmd(g_Puppet, "menuselect 5")
 	ASSERT_EQ(Option("SayFF"), 0)
+	bench_pass()
+}
+
+// write_file only returns 0 after raising an error, and the error stops the command: neither
+// message comes (statscfg.sma 95, 237 and 262 cannot run). The bench matches the error's
+// description, which names the native; its message is on the server console.
+public test_save_into_a_folder()
+{
+	if (!StartAdmin("badsaver"))
+		return
+	ASSERT(mkdir(g_StatsFile) == 0)
+	bench_expect_error("(native ^"write_file^") (plugin ^"statscfg.amxx^")")
+	bench_expect_error("(native ^"write_file^") (plugin ^"statscfg.amxx^")")
+	Cfg("save")
+	ASSERT_MSG(0, "server", "Couldn't write file")
+	ASSERT_EQ(bench_msg_count(g_Puppet, "TextMsg", "Stats configuration saved"), 0)
+	ASSERT_EQ(bench_msg_count(g_Puppet, "TextMsg", "Failed to save"), 0)
+
+	bench_puppet_cmd(g_Puppet, "amx_statscfgmenu")
+	bench_puppet_cmd(g_Puppet, "menuselect 8")
+	ASSERT_EQ(bench_msg_count(0, "server", "Couldn't write file"), 2)
+	ASSERT_EQ(bench_msg_count(g_Puppet, "TextMsg", "Stats configuration saved"), 0)
+	ASSERT_EQ(bench_msg_count(g_Puppet, "TextMsg", "Failed to save"), 0)
+	ASSERT(rmdir(g_StatsFile))
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Options added with "amx_statscfg add", on a map without TS Stats (a per-map plugin list
+// disables stats.amxx), so the list starts empty. Added options cannot be removed: the test ends
+// with a map change back to the normal plugins.
+
+public test_options_added_on_a_map_without_stats()
+{
+	if (!bench_check(!file_exists(g_MapPlugins), "no per-map plugin list"))
+		return
+	if (!dir_exists(g_MapsDir))
+		mkdir(g_MapsDir)
+	new f = fopen(g_MapPlugins, "wt")
+	ASSERT(f)
+	fprintf(f, "%s^nstats.amxx disabled^n", g_MapPluginsMark)
+	fclose(f)
+	bench_set_timeout(120.0)
+	bench_change_map("", "without_stats")
+}
+
+public without_stats()
+{
+	// The list was read at load, and this file's plugin_init removed it.
+	ASSERT_FALSE(file_exists(g_MapPlugins))
+	if (!StartAdmin("adder"))
+		return
+
+	// Nothing to configure: the first page is page 1 of 0.
+	bench_puppet_cmd(g_Puppet, "amx_statscfgmenu")
+	if (!MenuHas("Stats Configuration 1/0")) return
+	if (!MenuHas("Stats plugins are not^ninstalled on this server")) return
+	ASSERT_EQ(MenuKeys(), MENU_KEY_8|MENU_KEY_0)
+	bench_puppet_cmd(g_Puppet, "menuselect 10")
+
+	// A name starting with ST_ is a dictionary key.
+	Cfg("add ST_SAY_HP BenchStatsSwitch")
+	Cfg("list")
+	if (!ListLine(1, "ST_SAY_HP", "BenchStatsSwitch", "On")) return
+	ASSERT_MSG(g_Puppet, "TextMsg", "----- Entries 1 - 1 of 1 -----")
+	bench_puppet_cmd(g_Puppet, "amx_statscfgmenu")
+	if (!MenuHas("Stats Configuration 1/1")) return
+	if (!MenuHas("1. Say /hp On")) return
+	ASSERT_EQ(MenuKeys(), MENU_KEY_1|MENU_KEY_8|MENU_KEY_0)
+	bench_puppet_cmd(g_Puppet, "menuselect 10")
+
+	// Saved under its text in the server's language.
+	Cfg("save")
+	new line[128], len
+	ASSERT(read_file(g_StatsFile, 2, line, charsmax(line), len))
+	if (!SavedLine(line, "BenchStatsSwitch", "Say /hp")) return
+
+	// 72 at most.
+	for (new i = 2; i <= 72; i++)
+		Cfg(fmt("add ^"Option %d^" BenchStatsSwitch", i))
+	Cfg("list 72")
+	ASSERT_MSG(g_Puppet, "TextMsg", "----- Entries 72 - 72 of 72 -----")
+	ASSERT_EQ(bench_msg_count(g_Puppet, "TextMsg", "limit reached"), 0)
+	Cfg("add ^"Option 73^" BenchStatsSwitch")
+	ASSERT_MSG(g_Puppet, "TextMsg", "Can't add stats to the list, limit reached!")
+	Cfg("list 73")
+	ASSERT_MSG(g_Puppet, "TextMsg", "----- Entries 72 - 72 of 72 -----")
+
+	// Back to the normal plugins, with the server's own stats.ini (a copy; teardown puts the
+	// original back): Stats Configuration loads it on the next map.
+	CopyOriginalStatsFile()
+	bench_change_map("", "stats_back")
+}
+
+public stats_back()
+{
+	if (!StartAdmin("counter"))
+		return
+	Cfg("list")
+	ASSERT_MSG(g_Puppet, "TextMsg", "----- Entries 1 - 10 of 21 -----")
 	bench_pass()
 }

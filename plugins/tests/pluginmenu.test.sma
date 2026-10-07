@@ -332,6 +332,8 @@ public Cvar_Ready()
 
 	bench_puppet_cmd(id, "menuselect 1")
 	ASSERT_MSG(id, "", "[AMXX] Type in the new value for pmtest_cvar, or !cancel to cancel.")
+	// The chat box opens on the player's side, ready to send amx_changecvar.
+	ASSERT_MSG(id, "stufftext", "messagemode amx_changecvar")
 	ASSERT_EQ(bench_menu_open(id), -1)
 
 	bench_puppet_cmd(id, "amx_changecvar ^"7^"")
@@ -435,9 +437,12 @@ public Cmd_Ready()
 	ASSERT_MENU(id, "Execute with parameters.")
 	bench_puppet_cmd(id, "menuselect 1")
 	ASSERT_MSG(id, "", "[AMXX] Type in the parameters for pmtest_all, or !cancel to cancel.")
+	ASSERT_MSG(id, "stufftext", "messagemode amx_executecmd")
 	ASSERT_EQ(bench_menu_open(id), -1)
 	bench_puppet_cmd(id, "amx_executecmd ^"a b^"")
 	ASSERT_MSG(id, "", "[AMXX] Command ^"pmtest_all^" executed with ^"a b^"")
+	// The command itself is run on the player's side.
+	ASSERT_MSG(id, "stufftext", "pmtest_all a b")
 	ASSERT_MENU(id, "Plugin Menu Tests Commands:")
 
 	// Without parameters; a command without a description has only its name as the title.
@@ -445,10 +450,13 @@ public Cmd_Ready()
 	ASSERT_MENU(id, "pmtest_user^n^n")
 	bench_puppet_cmd(id, "menuselect 2")
 	ASSERT_MSG(id, "", "[AMXX] Command ^"pmtest_user^" executed with no parameters")
+	ASSERT_MSG(id, "stufftext", "pmtest_user")
 	ASSERT_MENU(id, "Plugin Menu Tests Commands:")
 
+	new stuffed = bench_msg_count(id, "stufftext")
 	bench_puppet_cmd(id, "amx_executecmd !cancel")
 	ASSERT_MSG(id, "", "[AMXX] Command not executed.")
+	ASSERT_EQ(bench_msg_count(id, "stufftext"), stuffed)
 	ASSERT_MENU(id, "Plugin Menu Tests Commands:")
 
 	// Exit from a command goes back to the command list, from there to the plugin list.
