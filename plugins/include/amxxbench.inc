@@ -46,7 +46,9 @@ native bench_describe(const fmt[], any:...);
 
 // The running test changes the map, or makes a plugin change it: the run goes on on the new map by
 // calling step(data) in this test file, reloaded (its variables start over; puppets are gone, as the
-// engine drops fake clients on a map change). A map change no test expects fails the test running.
+// engine drops fake clients on a map change). The messages recorded so far are dropped; what the
+// server console prints while the new map loads is kept, as "server" lines. A map change no test
+// expects fails the test running.
 native bench_expect_map_change(const step[], data = 0);
 
 // Changes to map (the current one if empty) and goes on with step(data) there.
@@ -61,8 +63,9 @@ stock bench_change_map(const map[], const step[], data = 0)
 	server_cmd("changelevel %s", name);
 }
 
-// A run time error whose description contains text is part of the running test: it does not fail
-// the test, and the test fails if no such error comes before it ends. For code that must fail.
+// A run time error whose description, or the native's message logged with it, contains text is part
+// of the running test: it does not fail the test, and the test fails if no such error comes before it
+// ends. For code that must fail.
 native bench_expect_error(const text[]);
 
 // Lets the running test take up to seconds game seconds from its start (default bench_timeout).
@@ -82,7 +85,8 @@ native bench_wait_until(const condition[], const step[], Float:timeout, data = 0
 // Creates a fake client the module drives every frame. Returns its player index, 0 on failure.
 // Puppets are kicked when the test ends. A puppet stands in for a person: plugins see an ordinary
 // player (is_user_bot() is false, client_print reaches it) with its own auth ID, authid or else
-// STEAM_0:0:1001, 1002, ... in creation order. as_bot = true makes it a bot ("BOT") instead.
+// STEAM_0:0:1001, 1002, ... in creation order. as_bot = true makes it a bot ("BOT") instead; AMX Mod X
+// sends a bot no client_print text, so read what a bot is told from a human puppet.
 native bench_puppet(const name[] = "puppet", bool:as_bot = false, const authid[] = "");
 
 // Sets the buttons (IN_*) and movement a puppet holds until changed.
