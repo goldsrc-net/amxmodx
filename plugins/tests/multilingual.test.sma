@@ -67,23 +67,12 @@ bool:MenuShowsLanguage(index, const player[] = "en")
 	formatex(name, charsmax(name), "%L", code, "LANG_NAME")
 	formatex(label, charsmax(label), "%L", player, "PERSO_LANG")
 	MenuText(text, charsmax(text))
-	// The menu text comes back with bytes above 127 as negative cells, the formatted ones as
-	// positive: compare bytes.
-	Bytes(text)
-	Bytes(label)
-	Bytes(name)
 	if (contain(text, label) == -1 || contain(text, name) == -1)
 	{
 		bench_fail("menu ^"%s^" does not offer ^"%s %s^"", text, label, name)
 		return false
 	}
 	return true
-}
-
-Bytes(text[])
-{
-	for (new i = 0; text[i] != EOS; i++)
-		text[i] &= 0xFF
 }
 
 LangIndex(const code[])
