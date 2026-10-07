@@ -58,12 +58,15 @@ namespace SourceMod
 		void NextRow();
 		void Rewind();
 		bool NextResultSet();
+		unsigned int GetError(char *error, size_t maxlength);
 	private:
 		MYSQL *m_pMySQL;
 		MYSQL_RES *m_pRes;
 		MysqlResultRow m_kRow;
 		unsigned int m_Columns;
 		unsigned int m_Rows;
+		unsigned int m_Errno;
+		char m_Error[255];
 	};
 };
 

@@ -45,11 +45,15 @@ void MysqlQuery::FreeHandle()
 
 bool MysqlQuery::Execute(QueryInfo *info, char *error, size_t maxlength)
 {
+	/* The last result set reads what is left of its results, before the next query is sent. */
+	if (m_LastRes)
+	{
+		m_LastRes->FreeHandle();
+		m_LastRes = NULL;
+	}
+
 	bool res = ExecuteR(info, error, maxlength);
 
-	if (m_LastRes)
-		m_LastRes->FreeHandle();
-	
 	m_LastRes = (MysqlResultSet *)info->rs;
 
 	return res;
@@ -57,17 +61,18 @@ bool MysqlQuery::Execute(QueryInfo *info, char *error, size_t maxlength)
 
 bool MysqlQuery::Execute2(QueryInfo *info, char *error, size_t maxlength)
 {
-	bool res = ExecuteR(info, error, maxlength);
-
 	if (m_LastRes)
+	{
 		m_LastRes->FreeHandle();
+		m_LastRes = NULL;
+	}
+
+	bool res = ExecuteR(info, error, maxlength);
 
 	m_LastRes = (MysqlResultSet *)info->rs;
 
-	if (info->success)
+	if (!info->success)
 	{
-		info->insert_id = mysql_insert_id(m_pDatabase->m_pMysql);
-	} else {
 		info->insert_id = 0;
 	}
 
@@ -96,28 +101,42 @@ bool MysqlQuery::ExecuteR(QueryInfo *info, char *error, size_t maxlength)
 	}
 	else
 	{
-		MYSQL_RES *res = mysql_store_result(m_pDatabase->m_pMysql);
-		if (!res)
+		MYSQL *mysql = m_pDatabase->m_pMysql;
+		MYSQL_RES *res = mysql_store_result(mysql);
+
+		info->errorcode = 0;
+		info->success = true;
+		info->affected_rows = mysql_affected_rows(mysql);
+		info->insert_id = mysql_insert_id(mysql);
+		info->rs = NULL;
+
+		/**
+		 * A statement without a result set may be followed by more (multiple statements):
+		 * go on to the first result set, so it can be read and the connection stays in sync.
+		 */
+		while (!res && mysql_field_count(mysql) == 0 && mysql_more_results(mysql))
 		{
-			if (mysql_field_count(m_pDatabase->m_pMysql) > 0)
+			if (mysql_next_result(mysql) != 0)
 			{
-				//error !111!!11
-				info->errorcode = mysql_errno(m_pDatabase->m_pMysql);
-				info->success = false;
-				info->affected_rows = 0;
-				info->rs = NULL;
-			} else {
-				info->errorcode = 0;
-				info->success = true;
-				info->affected_rows = mysql_affected_rows(m_pDatabase->m_pMysql);
-				info->rs = NULL;
+				break;
 			}
-		} else {
-			info->errorcode = 0;
-			info->success = true;
-			info->affected_rows = mysql_affected_rows(m_pDatabase->m_pMysql);
-			MysqlResultSet *rs = new MysqlResultSet(res, m_pDatabase->m_pMysql);
+			res = mysql_store_result(mysql);
+		}
+
+		if (res)
+		{
+			MysqlResultSet *rs = new MysqlResultSet(res, mysql);
 			info->rs = rs;
+		}
+		else if (mysql_errno(mysql))
+		{
+			info->errorcode = mysql_errno(mysql);
+			info->success = false;
+			info->affected_rows = 0;
+			if (error && maxlength)
+			{
+				ke::SafeSprintf(error, maxlength, "%s", mysql_error(mysql));
+			}
 		}
 	}
 

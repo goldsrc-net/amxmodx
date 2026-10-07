@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "MysqlResultSet.h"
+#include <amtl/am-string.h>
 
 using namespace SourceMod;
 
@@ -80,6 +81,8 @@ MysqlResultSet::MysqlResultSet(MYSQL_RES *res, MYSQL *mysql) :
 	m_Rows = (unsigned int)mysql_num_rows(res);
 	m_Columns = (unsigned int)mysql_num_fields(res);
 	m_pMySQL = mysql;
+	m_Errno = 0;
+	m_Error[0] = '\0';
 
 	if (m_Rows > 0)
 	{
@@ -115,9 +118,23 @@ bool MysqlResultSet::NextResultSet()
 	}
 
 	mysql_free_result(m_pRes);
-	if (mysql_next_result(m_pMySQL) != 0
-		|| (m_pRes = mysql_store_result(m_pMySQL)) == NULL)
+	m_pRes = NULL;
+
+	/* Statements without a result set are passed over; an error ends the results. */
+	while (mysql_next_result(m_pMySQL) == 0)
 	{
+		if ((m_pRes = mysql_store_result(m_pMySQL)) != NULL
+			|| mysql_field_count(m_pMySQL) > 0
+			|| !mysql_more_results(m_pMySQL))
+		{
+			break;
+		}
+	}
+
+	if (m_pRes == NULL)
+	{
+		m_Errno = mysql_errno(m_pMySQL);
+		ke::SafeSprintf(m_Error, sizeof(m_Error), "%s", m_Errno ? mysql_error(m_pMySQL) : "");
 		m_Rows = 0;
 		m_pRes = NULL;
 		m_Columns = 0;
@@ -136,6 +153,13 @@ bool MysqlResultSet::NextResultSet()
 	m_kRow.m_Columns = m_Columns;
 
 	return true;
+}
+
+unsigned int MysqlResultSet::GetError(char *error, size_t maxlength)
+{
+	ke::SafeSprintf(error, maxlength, "%s", m_Error);
+
+	return m_Errno;
 }
 
 void MysqlResultSet::FreeHandle()
