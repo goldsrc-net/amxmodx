@@ -4121,6 +4121,11 @@
 		"game"  "ts"
 	}
 
+	"others.games/ts/offsets-s_ammo_info.txt"
+	{
+		"game"  "ts"
+	}
+
 	"others.games/ts/offsets-s_weapon_status.txt"
 	{
 		"game"  "ts"

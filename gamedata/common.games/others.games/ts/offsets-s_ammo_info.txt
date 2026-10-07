@@ -9,16 +9,25 @@
  * For more information, see http://wiki.alliedmods.net/Gamedata_Updating_(AMX_Mod_X)
  */
 
-"Game Master"
+"Games"
 {
-	"game.cstrike.txt"
+	"#default"
 	{
-		"game"  "cstrike"
-		"game"  "czero"
-	}
+		"Classes"
+		{
+			"s_ammo_info"  // 56 bytes, one per caliber, from get_ammo_info()
+			{
+				"Offsets"
+				{
+					"iMaxCarry"  // int
+					{
+						"type"      "integer"
 
-	"game.ts.txt"
-	{
-		"game"  "ts"
+						"windows"   "12"
+						"linux"     "12"
+					}
+				}
+			}
+		}
 	}
 }

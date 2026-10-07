@@ -99,6 +99,7 @@ extern int gKnifeOffset;
 extern weapon_t weaponData[TSMAX_WEAPONS];
 
 extern IGameConfig *CommonConfig;
+extern IGameConfig *MainConfig;
 
 #define GET_OFFSET(classname, member)												\
 	static int member = -1;															\
@@ -112,6 +113,20 @@ extern IGameConfig *CommonConfig;
 		}																			\
 		member = type.fieldOffset;                                                  \
 	}
+
+#define GET_SIGNATURE(name, function)												\
+	static void *function = nullptr;												\
+	if (!function)																	\
+	{																				\
+		if (!MainConfig || !MainConfig->GetMemSig(name, &function) || !function)	\
+		{																			\
+			MF_LogError(amx, AMX_ERR_NATIVE, "Invalid %s signature. Native %s is disabled", name, __FUNCTION__);\
+			return 0;																\
+		}																			\
+	}
+
+void UpdateSpeed(CPlayer *pPlayer);
+void EndSpeed(CPlayer *pPlayer);
 
 bool isModuleActive();
 bool ignoreBots (edict_t *pEnt, edict_t *pOther = NULL);

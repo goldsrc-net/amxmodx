@@ -35,6 +35,7 @@
 
 new g_Clip
 new g_Other
+new g_AmmoCount = -1
 
 public plugin_init()
 {
@@ -43,6 +44,12 @@ public plugin_init()
 
 public bench_teardown()
 {
+	if (g_AmmoCount != -1)
+	{
+		set_cvar_num("ammocount", g_AmmoCount)
+		g_AmmoCount = -1
+	}
+
 	// A thrown knife stays where it lands (a thrown grenade goes off by itself).
 	new ent = -1
 	while ((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "knife")))
@@ -52,6 +59,21 @@ public bench_teardown()
 FreeSlots(id)
 {
 	return get_ent_data(id, "CBasePlayer", "m_iFreeSlots")
+}
+
+Float:MaxSpeed(id)
+{
+	new Float:speed
+	pev(id, pev_maxspeed, speed)
+	return speed
+}
+
+// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up.
+SpeedBySlots(slots)
+{
+	if (slots > 80)
+		return 330
+	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_tozero)
 }
 
 // The reserve in the last WeaponInfo the game sent the player about weapon, or -1.
@@ -167,6 +189,38 @@ public reloaded(id)
 	bench_pass()
 }
 
+public test_reserve_stops_at_the_max_carry()
+{
+	g_AmmoCount = get_cvar_num("ammocount")
+	set_cvar_num("ammocount", 0)
+	new id = bench_puppet("hoarder")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "hoard_spawned", 20.0, "respawn")
+}
+
+public hoard_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	// With ammocount 0 a player carries 210 rounds of 9mm and 70 of .50 AE (Set_ammo_count).
+	ASSERT_EQ(ts_setuserammo(id, GLOCK18, 10000), 1)
+	ASSERT_EQ(ts_getuserammo(id, GLOCK18), 210)
+	ASSERT_EQ(ts_setuserammo(id, DEAGLE, 10000), 1)
+	ASSERT_EQ(ts_getuserammo(id, DEAGLE), 70)
+	ASSERT_EQ(ts_setuserammo(id, GLOCK18, 100), 1)
+	ASSERT_EQ(ts_getuserammo(id, GLOCK18), 100)
+	// The game applies a new ammocount on its next think.
+	set_cvar_num("ammocount", 1)
+	bench_next("hoard_fewer", 0.5, id)
+}
+
+public hoard_fewer(id)
+{
+	// With ammocount 1, 90 rounds of 9mm.
+	ASSERT_EQ(ts_setuserammo(id, GLOCK18, 10000), 1)
+	ASSERT_EQ(ts_getuserammo(id, GLOCK18), 90)
+	bench_pass()
+}
+
 // --- the grenade and the knives --------------------------------------------------------------
 
 public test_grenades_count_in_the_clip_and_hold_slots()
@@ -223,6 +277,37 @@ public grenade_counted(id)
 {
 	ASSERT_EQ(ts_getuserammo(id, M61), 2)
 	ASSERT_EQ(FreeSlots(id), g_Clip - 14)
+	bench_pass()
+}
+
+public test_stack_moves_the_speed_with_the_slots()
+{
+	new id = bench_puppet("laden")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "laden_spawned", 20.0, "respawn")
+}
+
+public laden_spawned(id)
+{
+	ts_giveweapon(id, M61, 1, 0)
+	bench_next("laden_ready", 0.2, id)
+}
+
+public laden_ready(id)
+{
+	// The speed the game gave him for the grenade he picked up.
+	new speed = floatround(MaxSpeed(id))
+	ASSERT_EQ(speed, SpeedBySlots(FreeSlots(id)))
+	ASSERT(FreeSlots(id) <= 80)
+
+	// Two more take 14 slots and slow him as the game's own pickups would.
+	ASSERT_EQ(ts_setuserammo(id, M61, 3), 1)
+	ASSERT_EQ(floatround(MaxSpeed(id)), SpeedBySlots(FreeSlots(id)))
+	ASSERT(floatround(MaxSpeed(id)) < speed)
+
+	// And back to one grenade, back to the speed the game gave him.
+	ASSERT_EQ(ts_setuserammo(id, M61, 1), 1)
+	ASSERT_EQ(floatround(MaxSpeed(id)), speed)
 	bench_pass()
 }
 

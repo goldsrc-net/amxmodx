@@ -133,12 +133,25 @@ static cell AMX_NATIVE_CALL get_user_weapon(AMX *amx, cell *params){
 #define END_USER_FUNC() \
 	}
 
+// The gamedata describes the 32-bit game library.
+#if defined(__i386__) || defined(_M_IX86)
+#define REQUIRE_TS30()
+#else
+#define REQUIRE_TS30()																\
+	MF_LogError(amx, AMX_ERR_NATIVE, "Native %s needs the 32-bit The Specialists 3.0", __FUNCTION__);\
+	return 0;
+#endif
+
 BEGIN_USER_FUNC(get_user_slots)
-	return pPlayer->GetSlots();
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iFreeSlots);
+	return get_pdata<int>(pPlayer->pEdict, m_iFreeSlots);
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(set_user_slots)
-	pPlayer->SetSlots(params[2]);
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iFreeSlots);
+	set_pdata<int>(pPlayer->pEdict, m_iFreeSlots, params[2]);
 	return 1;
 END_USER_FUNC()
 
@@ -147,88 +160,201 @@ BEGIN_USER_FUNC(get_user_state)
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(get_user_message)
-	int val = pPlayer->GetOffset(TSX_MSG_OFFSET);
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iAward);
+	int val = get_pdata<byte>(pPlayer->pEdict, m_iAward);
 	return (val & 15);
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(set_user_message)
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iAward);
 	int message = params[2];
 	if (message < 1 || message > 16)
 	{
 		MF_LogError(amx, AMX_ERR_NATIVE, "Invalid message id: %d", message);
 		return 0;
 	}
-	int val = pPlayer->GetOffset(TSX_MSG_OFFSET);
-	pPlayer->SetOffset(TSX_MSG_OFFSET, (val & ~15)^message);
+	int val = get_pdata<byte>(pPlayer->pEdict, m_iAward);
+	set_pdata<byte>(pPlayer->pEdict, m_iAward, (val & ~15)^message);
 	return 1;
 END_USER_FUNC()
 
+// The bullet-time flag the game sends to this player alone (TSBTime); slow-pause sets it.
 BEGIN_USER_FUNC(set_bullettrail)
-	int bullettrail = params[2] * 256;
-	pPlayer->SetOffset(TSX_BTRAIL_OFFSET, bullettrail);
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_bSlowBullets);
+	set_pdata<bool>(pPlayer->pEdict, m_bSlowBullets, params[2] != 0);
 	return 1;
 END_USER_FUNC()
+
+// Runs a slow-motion or slow-pause powerup for time seconds without one being picked up: held and
+// active, as CBasePlayer::UsePowerUp leaves it. The game applies it and ends it itself.
+static cell RunPowerup(AMX *amx, CPlayer *pPlayer, int type, float time)
+{
+	GET_OFFSET("CBasePlayer", m_iPowerups);
+	GET_OFFSET("CBasePlayer", m_iHeldPowerup);
+	GET_OFFSET("CBasePlayer", m_flPowerupExpireTime);
+	GET_OFFSET("CBasePlayer", m_iPowerupTime);
+	set_pdata<int>(pPlayer->pEdict, m_iHeldPowerup, type);
+	set_pdata<int>(pPlayer->pEdict, m_iPowerups, type);
+	set_pdata<int>(pPlayer->pEdict, m_iPowerupTime, (int)time);
+	set_pdata<float>(pPlayer->pEdict, m_flPowerupExpireTime, gpGlobals->time+time);
+	return 1;
+}
 
 BEGIN_USER_FUNC(set_fake_slowmo)
-	float time = amx_ctof(params[2]);
-	pPlayer->SetOffset(TSX_SLOMO1_OFFSET, TSPWUP_SLOWMO);
-	float prev = pPlayer->GetTime();
-	pPlayer->SetOffsetF(TSX_SLOMO2_OFFSET, prev+time);
-	return 1;
+	REQUIRE_TS30();
+	return RunPowerup(amx, pPlayer, TSPWUP_SLOWMO, amx_ctof(params[2]));
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(set_fake_slowpause)
-	float time = amx_ctof(params[2]);
-	pPlayer->SetOffset(TSX_SLOMO1_OFFSET, TSPWUP_SLOWPAUSE);
-	float prev = pPlayer->GetTime();
-	pPlayer->SetOffsetF(TSX_SLOMO2_OFFSET, prev+time);
-	return 1;
+	REQUIRE_TS30();
+	return RunPowerup(amx, pPlayer, TSPWUP_SLOWPAUSE, amx_ctof(params[2]));
 END_USER_FUNC()
 
+// When the slow motion this player runs ends: his ts_set_speed, or his slow-motion or slow-pause powerup.
 BEGIN_USER_FUNC(is_in_slowmo)
-	if (pPlayer->GetOffsetF(TSX_ISSLO_OFFSET))
-		return amx_ftoc(pPlayer->GetOffsetF(TSX_SLOMO2_OFFSET));
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iPowerups);
+	GET_OFFSET("CBasePlayer", m_flPowerupExpireTime);
+	if (pPlayer->speedActive)
+		return amx_ftoc(pPlayer->speedEnd);
+	if (get_pdata<int>(pPlayer->pEdict, m_iPowerups) & (TSPWUP_SLOWMO | TSPWUP_SLOWPAUSE))
+		return amx_ftoc(get_pdata<float>(pPlayer->pEdict, m_flPowerupExpireTime));
 	return 0;
 END_USER_FUNC()
 
+// The Specialists 3.0 slows a player with CBasePlayer::GoSlow: his movement eases to m_flSlowMotionGo
+// (pev->fuser1 follows it, and the player's movement and animations run at that rate) and his client is
+// told m_flSlowMotionTarget. TSX does the same for ts_set_speed, every frame until it wears off.
+static int SlowMotionGo = -1;
+static int SlowMotionTarget = -1;
+static int SlowMotionScale = -1;
+
+static void GoSlow(edict_t *pEdict, float speed)
+{
+	set_pdata<float>(pEdict, SlowMotionGo, pEdict->v.iuser1 ? 1.0f : speed);
+	set_pdata<float>(pEdict, SlowMotionTarget, speed);
+}
+
+// Back to normal, unless the player runs a slow powerup of his own, whose slow motion the game keeps.
+static void EndSlow(edict_t *pEdict)
+{
+	if (get_pdata<float>(pEdict, SlowMotionScale) == 0.0f)
+		GoSlow(pEdict, 1.0f);
+}
+
+void UpdateSpeed(CPlayer *pPlayer)
+{
+	if (gpGlobals->time >= pPlayer->speedEnd)
+	{
+		EndSpeed(pPlayer);
+		return;
+	}
+
+	for (int i = 1; i <= gpGlobals->maxClients; ++i)
+	{
+		CPlayer *pOther = GET_PLAYER_POINTER_I(i);
+		edict_t *pEdict = pOther->pEdict;
+		if (!pOther->ingame || !pEdict || !pEdict->pvPrivateData)
+			continue;
+
+		bool inAura = pOther == pPlayer ||
+			(pOther->IsAlive() && (pEdict->v.origin - pPlayer->pEdict->v.origin).Length() <= pPlayer->speedAura);
+
+		if (inAura)
+		{
+			GoSlow(pEdict, pPlayer->speedValue);
+			pOther->speedBy = pPlayer->index;
+		}
+		else if (pOther->speedBy == pPlayer->index)
+		{
+			EndSlow(pEdict);
+			pOther->speedBy = 0;
+		}
+	}
+}
+
+void EndSpeed(CPlayer *pPlayer)
+{
+	pPlayer->speedActive = false;
+
+	for (int i = 1; i <= gpGlobals->maxClients; ++i)
+	{
+		CPlayer *pOther = GET_PLAYER_POINTER_I(i);
+		if (pOther->speedBy != pPlayer->index)
+			continue;
+		pOther->speedBy = 0;
+		if (pOther->pEdict && pOther->pEdict->pvPrivateData)
+			EndSlow(pOther->pEdict);
+	}
+}
+
 BEGIN_USER_FUNC(set_speed)
-	pPlayer->SetOffsetF(TSX_ISSLO_OFFSET, amx_ctof(params[2]));
-	pPlayer->SetOffsetF(TSX_SPEED2_OFFSET, amx_ctof(params[3]));
-	pPlayer->SetOffsetF(TSX_SPEED1_OFFSET, amx_ctof(params[3]));
-	pPlayer->SetOffsetF(TSX_SLOMO2_OFFSET, amx_ctof(params[4]));
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_flSlowMotionGo);
+	GET_OFFSET("CBasePlayer", m_flSlowMotionTarget);
+	GET_OFFSET("CBasePlayer", m_flSlowMotionScale);
+	float speed = amx_ctof(params[2]);
+	float aura = amx_ctof(params[3]);
+	float time = amx_ctof(params[4]);
+	if (speed < 0.0f || aura < 0.0f || time < 0.0f)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "Invalid speed %f, aura %f or time %f", speed, aura, time);
+		return 0;
+	}
+	SlowMotionGo = m_flSlowMotionGo;
+	SlowMotionTarget = m_flSlowMotionTarget;
+	SlowMotionScale = m_flSlowMotionScale;
+	pPlayer->speedActive = true;
+	pPlayer->speedValue = speed;
+	pPlayer->speedAura = aura;
+	pPlayer->speedEnd = gpGlobals->time + time;
+	UpdateSpeed(pPlayer);
 	return 1;
 END_USER_FUNC()
 
+// The game sends the player's slow-motion target to his client (TSSlowMo), which plays his sounds and
+// effects at that rate; his own movement keeps its speed.
 BEGIN_USER_FUNC(set_physics_speed)
-	pPlayer->SetOffsetF(TSX_PHYSICS_OFFSET, amx_ctof(params[2]));
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_flSlowMotionTarget);
+	set_pdata<float>(pPlayer->pEdict, m_flSlowMotionTarget, amx_ctof(params[2]));
 	return 1;
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(is_running_powerup)
-	return pPlayer->GetOffset(TSX_SLOMO1_OFFSET);
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iPowerups);
+	return get_pdata<int>(pPlayer->pEdict, m_iPowerups);
 END_USER_FUNC()
 
+// The game runs a powerup only while it is also held; one started here lasts the held duration, as
+// CBasePlayer::UsePowerUp starts it.
 BEGIN_USER_FUNC(force_powerup_run)
-	pPlayer->SetOffset(TSX_SLOMO1_OFFSET, params[2]);
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iPowerups);
+	GET_OFFSET("CBasePlayer", m_iHeldPowerup);
+	GET_OFFSET("CBasePlayer", m_flPowerupExpireTime);
+	GET_OFFSET("CBasePlayer", m_iPowerupTime);
+	if (!get_pdata<int>(pPlayer->pEdict, m_iPowerups))
+		set_pdata<float>(pPlayer->pEdict, m_flPowerupExpireTime, gpGlobals->time + get_pdata<int>(pPlayer->pEdict, m_iPowerupTime));
+	set_pdata<int>(pPlayer->pEdict, m_iHeldPowerup, params[2]);
+	set_pdata<int>(pPlayer->pEdict, m_iPowerups, params[2]);
 	return 1;
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(has_superjump)
-	int val3 = pPlayer->GetOffset(TSX_MSG_OFFSET);
-
-	if (val3 & 0x01000000)
-		return 1;
-
-	return 0;
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_bLowGravity);
+	return get_pdata<bool>(pPlayer->pEdict, m_bLowGravity) ? 1 : 0;
 END_USER_FUNC()
 
 BEGIN_USER_FUNC(has_fupowerup)
-	int val3 = pPlayer->GetOffset(TSX_MSG_OFFSET);
-
-	if (val3 & 65536)
-		return 1;
-
-	return 0;
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iKungFu);
+	return get_pdata<byte>(pPlayer->pEdict, m_iKungFu) ? 1 : 0;
 END_USER_FUNC()
 
 // The Specialists 3.0 weapon ids (0-37) and where each keeps its ammo, as the game's Write_<weapon>
@@ -252,6 +378,16 @@ static const int weaponUnitSlots[TSWEAPON_COUNT] = {
 	0, 0, 0, 0, 0, 1, 0, 0
 };
 
+// The game's own functions: the ammo table by caliber (whose iMaxCarry follows the ammocount cvar) and
+// the move speed it gives a player for his free slots.
+typedef void *(*GetAmmoInfoFunc)(int caliber);
+typedef float (*GetSpeedBySlotsFunc)(void *pPlayer);
+#if defined(_WIN32)
+typedef void (__fastcall *SetPlayerSpeedFunc)(void *pPlayer, int edx, float speed);
+#else
+typedef void (*SetPlayerSpeedFunc)(void *pPlayer, float speed);
+#endif
+
 // A player's weapon_tsgun, the one item that holds his whole arsenal.
 static edict_t *GetPlayerGun(edict_t *pPlayer)
 {
@@ -265,15 +401,6 @@ static edict_t *GetPlayerGun(edict_t *pPlayer)
 
 	return NULL;
 }
-
-// The gamedata describes the 32-bit game library.
-#if defined(__i386__) || defined(_M_IX86)
-#define REQUIRE_TS30()
-#else
-#define REQUIRE_TS30()																\
-	MF_LogError(amx, AMX_ERR_NATIVE, "Native %s needs the 32-bit The Specialists 3.0", __FUNCTION__);\
-	return 0;
-#endif
 
 BEGIN_USER_FUNC(get_user_ammo)
 	int weapon = params[2];
@@ -324,7 +451,12 @@ BEGIN_USER_FUNC(set_user_ammo)
 	if (weaponCaliber[weapon])
 	{
 		GET_OFFSET("CTSGun", m_ammoReserve);
-		set_pdata<int>(pGun, m_ammoReserve, ammo, weaponCaliber[weapon]);
+		GET_OFFSET("s_ammo_info", iMaxCarry);
+		GET_SIGNATURE("get_ammo_info", GetAmmoInfo);
+		// No more than the game's own AddAmmo lets the caliber hold.
+		void *info = reinterpret_cast<GetAmmoInfoFunc>(GetAmmoInfo)(weaponCaliber[weapon]);
+		int maxCarry = *reinterpret_cast<int *>(reinterpret_cast<char *>(info) + iMaxCarry);
+		set_pdata<int>(pGun, m_ammoReserve, ammo < maxCarry ? ammo : maxCarry, weaponCaliber[weapon]);
 		return 1;
 	}
 	// A stack is never empty: the game drops it when the last unit goes. Its units hold free slots,
@@ -335,6 +467,8 @@ BEGIN_USER_FUNC(set_user_ammo)
 	GET_OFFSET("s_weapon_status", bOwned);
 	GET_OFFSET("s_weapon_status", iClip);
 	GET_OFFSET("CBasePlayer", m_iFreeSlots);
+	GET_SIGNATURE("GetSpeedBySlots", GetSpeedBySlots);
+	GET_SIGNATURE("SetPlayerSpeed", SetPlayerSpeed);
 	int status = m_weaponStatus + weapon * TS_WEAPON_STATUS_SIZE;
 	if (!get_pdata<bool>(pGun, status + bOwned))
 		return 0;
@@ -344,6 +478,14 @@ BEGIN_USER_FUNC(set_user_ammo)
 		return 0;
 	set_pdata<int>(pPlayer->pEdict, m_iFreeSlots, freeSlots - slots);
 	set_pdata<int>(pGun, status + iClip, ammo);
+	// The move speed follows the free slots, as after the game's own throws and pickups.
+	void *pvPlayer = pPlayer->pEdict->pvPrivateData;
+	float speed = reinterpret_cast<GetSpeedBySlotsFunc>(GetSpeedBySlots)(pvPlayer);
+#if defined(_WIN32)
+	reinterpret_cast<SetPlayerSpeedFunc>(SetPlayerSpeed)(pvPlayer, 0, speed);
+#else
+	reinterpret_cast<SetPlayerSpeedFunc>(SetPlayerSpeed)(pvPlayer, speed);
+#endif
 	return 1;
 END_USER_FUNC()
 
@@ -355,10 +497,12 @@ static cell AMX_NATIVE_CALL set_user_cash(AMX *amx, cell *params)
 		MF_LogError(amx, AMX_ERR_NATIVE, "Player %d is not valid", id);
 		return 0;
 	}
+	REQUIRE_TS30();
+	GET_OFFSET("CBasePlayer", m_iCash);
 	CPlayer *pPlayer = GET_PLAYER_POINTER_I(id);
 	if (pPlayer->ingame)
 	{
-		pPlayer->SetMoney(params[2]);
+		set_pdata<int>(pPlayer->pEdict, m_iCash, params[2]);
 		pPlayer->money = params[2];
 	}
 	return 0;

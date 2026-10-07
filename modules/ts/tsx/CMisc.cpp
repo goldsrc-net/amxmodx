@@ -31,6 +31,9 @@ void CPlayer::PutInServer()
 	restartStats();
 	ingame = true;
 
+	speedActive = false;
+	speedBy = 0;
+
 	killingSpree = 0;
 	items = 0;
     lastFrag = 0;
@@ -92,6 +95,8 @@ void CPlayer::Init( int pi, edict_t* pe )
 	current = 0;
 	clearStats = 0.0f;
 	ingame = false;
+	speedActive = false;
+	speedBy = 0;
 }
 
 void CPlayer::saveKill(CPlayer* pVictim, int wweapon, int hhs, int ttk)
@@ -195,46 +200,6 @@ void CPlayer::saveShot(int weapon)
 	life.shots++;
 	weaponsRnd[weapon].shots++;       // DEC-Weapon (round) stats
 	weaponsRnd[0].shots++;            // DEC-Weapon (round) stats
-}
-
-void CPlayer::SetOffsetF(int offs, float val)
-{
-	*((float *)pEdict->pvPrivateData + offs) = val;
-}
-
-void CPlayer::SetOffset(int offs, int val)
-{
-	*((int *)pEdict->pvPrivateData + offs) = val;
-}
-
-float CPlayer::GetOffsetF(int offs)
-{
-	return *((float *)pEdict->pvPrivateData + offs);
-}
-
-int CPlayer::GetOffset(int offs)
-{
-	return *((int *)pEdict->pvPrivateData + offs);
-}
-
-float CPlayer::GetTime()
-{
-	return GetOffsetF(TSX_TIME_OFFSET);
-}
-
-void CPlayer::SetMoney(int money)
-{
-	SetOffset(TSX_MONEY_OFFSET, money);
-}
-
-void CPlayer::SetSlots(int slots)
-{
-	SetOffset(TSX_SLOTS_OFFSET, slots);
-}
-
-int CPlayer::GetSlots()
-{
-	return GetOffset(TSX_SLOTS_OFFSET);
 }
 
 

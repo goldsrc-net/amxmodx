@@ -46,6 +46,7 @@ int gmsgPwUp;
 RankSystem g_rank;
 
 IGameConfig *CommonConfig;
+IGameConfig *MainConfig;
 IGameConfigManager *ConfigManager;
 
 cvar_t init_tsstats_maxsize ={"tsstats_maxsize","3500", 0 , 3500.0 };
@@ -150,6 +151,9 @@ void PlayerPreThink_Post( edict_t *pEntity )
 
 	check_stunts(pEntity);
 
+	if (pPlayer->speedActive)
+		UpdateSpeed(pPlayer);
+
 	if ( !isModuleActive() ) // stats only
 		return;
 
@@ -194,6 +198,7 @@ BOOL ClientConnect_Post( edict_t *pEntity, const char *pszName, const char *pszA
 void ClientDisconnect( edict_t *pEntity )
 {
 	CPlayer *pPlayer = GET_PLAYER_POINTER(pEntity);
+	if (pPlayer->speedActive) EndSpeed(pPlayer);
 	if (pPlayer->ingame) pPlayer->Disconnect();
 	RETURN_META(MRES_IGNORED);
 }
@@ -352,6 +357,12 @@ void OnAmxxAttach()
 		MF_Log("Could not read common.games gamedata: %s", error);
 	}
 
+	error[0] = '\0';
+	if (!ConfigManager->LoadGameConfigFile("modules.games", &MainConfig, error, sizeof(error)) && *error)
+	{
+		MF_Log("Could not read modules.games gamedata: %s", error);
+	}
+
 	const char* path =  get_localinfo("tsstats_score","addons/amxmodx/data/tsstats.amxx");
 	if ( path && *path ) 
 	{
@@ -370,4 +381,5 @@ void OnAmxxDetach()
 	g_rank.unloadCalc();
 
 	ConfigManager->CloseGameConfigFile(CommonConfig);
+	ConfigManager->CloseGameConfigFile(MainConfig);
 }

@@ -430,6 +430,7 @@ CopyFiles('gamedata/modules.games', 'base/addons/amxmodx/data/gamedata/modules.g
   [
     'master.games.txt',
     'game.cstrike.txt',
+    'game.ts.txt',
   ]
 )
 
@@ -526,6 +527,7 @@ CopyFiles('gamedata/common.games/others.games/cstrike', 'base/addons/amxmodx/dat
 
 CopyFiles('gamedata/common.games/others.games/ts', 'base/addons/amxmodx/data/gamedata/common.games/others.games/ts',
   [
+    'offsets-s_ammo_info.txt',
     'offsets-s_weapon_status.txt',
   ]
 )

@@ -19,12 +19,166 @@
 			{
 				"Offsets"
 				{
+					"m_flSlowMotionGo"  // float
+					{
+						"type"      "float"
+
+						"windows"   "340"
+						"linux"     "360"
+					}
+
+					"m_flClientSlowAmt"  // float
+					{
+						"type"      "float"
+
+						"windows"   "344"
+						"linux"     "364"
+					}
+
+					"m_flSlowMotionTarget"  // float
+					{
+						"type"      "float"
+
+						"windows"   "348"
+						"linux"     "368"
+					}
+
+					"m_bSlowBullets"  // bool
+					{
+						"type"      "boolean"
+
+						"windows"   "353"
+						"linux"     "373"
+					}
+
+					"m_flNextSlowFlow"  // float
+					{
+						"type"      "float"
+
+						"windows"   "356"
+						"linux"     "376"
+					}
+
+					"m_flSlowMotionScale"  // float
+					{
+						"type"      "float"
+
+						"windows"   "360"
+						"linux"     "380"
+					}
+
+					"m_flSlowMotionRamp"  // float
+					{
+						"type"      "float"
+
+						"windows"   "364"
+						"linux"     "384"
+					}
+
+					"m_iCash"  // int
+					{
+						"type"      "integer"
+
+						"windows"   "1324"
+						"linux"     "1344"
+					}
+
 					"m_iFreeSlots"  // int
 					{
 						"type"      "integer"
 
 						"windows"   "1332"
 						"linux"     "1352"
+					}
+
+					"m_iItemBits"  // int
+					{
+						"type"      "integer"
+
+						"windows"   "1796"
+						"linux"     "1816"
+					}
+
+					"m_iPowerups"  // int
+					{
+						"type"      "integer"
+
+						"windows"   "1808"
+						"linux"     "1828"
+					}
+
+					"m_iHeldPowerup"  // int
+					{
+						"type"      "integer"
+
+						"windows"   "1812"
+						"linux"     "1832"
+					}
+
+					"m_flPowerupExpireTime"  // float
+					{
+						"type"      "float"
+
+						"windows"   "1816"
+						"linux"     "1836"
+					}
+
+					"m_iPowerupTime"  // int
+					{
+						"type"      "integer"
+
+						"windows"   "1820"
+						"linux"     "1840"
+					}
+
+					"m_iAward"  // byte
+					{
+						"type"      "character"
+						"unsigned"  "1"
+
+						"windows"   "1848"
+						"linux"     "1868"
+					}
+
+					"m_iKungFu"  // byte
+					{
+						"type"      "character"
+						"unsigned"  "1"
+
+						"windows"   "1850"
+						"linux"     "1870"
+					}
+
+					"m_bLowGravity"  // bool
+					{
+						"type"      "boolean"
+
+						"windows"   "1851"
+						"linux"     "1871"
+					}
+
+					"m_flMeleeBar"  // float
+					{
+						"type"      "float"
+
+						"windows"   "1888"
+						"linux"     "1908"
+					}
+
+					"m_flWhiffLungeTime"  // float
+					{
+						"type"      "float"
+
+						"windows"   "1928"
+						"linux"     "1948"
+					}
+
+					"m_flWhiffLungeForce"  // float
+					{
+						"type"      "float"
+
+						"windows"   "1932"
+						"linux"     "1952"
 					}
 				}
 			}
