@@ -151,10 +151,10 @@ public leave()
 	new prefix[128]
 	formatex(prefix, charsmax(prefix), "^"%s<%d><%s><", g_Name, g_UserId, g_Auth)
 	ASSERT(CheckLogged(prefix))
-	// The weapon's log name, as TSX gives it. (TSX's custom_weapon_add drops the log name it is
-	// given, so for a custom weapon this is empty.)
+	// The weapon's log name is the one custom_weapon_add was given.
 	new logname[32], expected[256]
 	xmod_get_wpnlogname(g_Gun, logname, charsmax(logname))
+	ASSERT_STR_EQ(logname, "loggun")
 	formatex(expected, charsmax(expected), "triggered ^"weaponstats^" (weapon ^"%s^") (shots ^"2^") (hits ^"1^") (kills ^"1^") (headshots ^"1^") (tks ^"0^") (damage ^"25^") (deaths ^"0^")", logname)
 	ASSERT(CheckLogged(expected))
 	formatex(expected, charsmax(expected), "triggered ^"weaponstats2^" (weapon ^"%s^") (head ^"1^") (chest ^"0^") (stomach ^"0^") (leftarm ^"0^") (rightarm ^"0^") (leftleg ^"0^") (rightleg ^"0^")", logname)
