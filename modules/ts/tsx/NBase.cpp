@@ -231,6 +231,122 @@ BEGIN_USER_FUNC(has_fupowerup)
 	return 0;
 END_USER_FUNC()
 
+// The Specialists 3.0 weapon ids (0-37) and where each keeps its ammo, as the game's Write_<weapon>
+// functions set it up: guns reload from the reserve of their caliber (s_weapon_info+8), shared by every
+// gun of that caliber; the grenade and the two knives count in their own clip, each unit taking free
+// slots (s_weapon_info+0xdc, +0xd0). Kung fu, the flag and the katana have no ammo.
+#define TSWEAPON_COUNT			38
+#define TS_WEAPON_STATUS_SIZE	56 // sizeof(s_weapon_status)
+
+static const int weaponCaliber[TSWEAPON_COUNT] = {
+	0, 1, 1, 1, 3, 4, 1, 1, 1, 2,
+	2, 3, 5, 6, 7, 4, 1, 12, 8, 7,
+	3, 2, 9, 2, 0, 0, 3, 4, 10, 0,
+	7, 11, 4, 3, 0, 0, 13, 12
+};
+
+static const int weaponUnitSlots[TSWEAPON_COUNT] = {
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 7, 1, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 1, 0, 0
+};
+
+// A player's weapon_tsgun, the one item that holds his whole arsenal.
+static edict_t *GetPlayerGun(edict_t *pPlayer)
+{
+	edict_t *pGun = NULL;
+
+	while (!FNullEnt(pGun = FIND_ENTITY_BY_STRING(pGun, "classname", "weapon_tsgun")))
+	{
+		if (pGun->v.owner == pPlayer && pGun->pvPrivateData)
+			return pGun;
+	}
+
+	return NULL;
+}
+
+// The gamedata describes the 32-bit game library.
+#if defined(__i386__) || defined(_M_IX86)
+#define REQUIRE_TS30()
+#else
+#define REQUIRE_TS30()																\
+	MF_LogError(amx, AMX_ERR_NATIVE, "Native %s needs the 32-bit The Specialists 3.0", __FUNCTION__);\
+	return 0;
+#endif
+
+BEGIN_USER_FUNC(get_user_ammo)
+	int weapon = params[2];
+	if (weapon < 0 || weapon >= TSWEAPON_COUNT)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "Weapon %d is not valid", weapon);
+		return 0;
+	}
+	if (!weaponCaliber[weapon] && !weaponUnitSlots[weapon])
+		return 0;
+	REQUIRE_TS30();
+	edict_t *pGun = GetPlayerGun(pPlayer->pEdict);
+	if (!pGun)
+		return 0;
+	if (weaponCaliber[weapon])
+	{
+		GET_OFFSET("CTSGun", m_ammoReserve);
+		return get_pdata<int>(pGun, m_ammoReserve, weaponCaliber[weapon]);
+	}
+	GET_OFFSET("CTSGun", m_weaponStatus);
+	GET_OFFSET("s_weapon_status", bOwned);
+	GET_OFFSET("s_weapon_status", iClip);
+	int status = m_weaponStatus + weapon * TS_WEAPON_STATUS_SIZE;
+	if (!get_pdata<bool>(pGun, status + bOwned))
+		return 0;
+	return get_pdata<int>(pGun, status + iClip);
+END_USER_FUNC()
+
+BEGIN_USER_FUNC(set_user_ammo)
+	int weapon = params[2];
+	int ammo = params[3];
+	if (weapon < 0 || weapon >= TSWEAPON_COUNT)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "Weapon %d is not valid", weapon);
+		return 0;
+	}
+	if (ammo < 0)
+	{
+		MF_LogError(amx, AMX_ERR_NATIVE, "Invalid ammo amount: %d", ammo);
+		return 0;
+	}
+	if (!weaponCaliber[weapon] && !weaponUnitSlots[weapon])
+		return 0;
+	REQUIRE_TS30();
+	edict_t *pGun = GetPlayerGun(pPlayer->pEdict);
+	if (!pGun)
+		return 0;
+	if (weaponCaliber[weapon])
+	{
+		GET_OFFSET("CTSGun", m_ammoReserve);
+		set_pdata<int>(pGun, m_ammoReserve, ammo, weaponCaliber[weapon]);
+		return 1;
+	}
+	// A stack is never empty: the game drops it when the last unit goes. Its units hold free slots,
+	// which the game hands back one unit at a time as they are thrown.
+	if (ammo < 1)
+		return 0;
+	GET_OFFSET("CTSGun", m_weaponStatus);
+	GET_OFFSET("s_weapon_status", bOwned);
+	GET_OFFSET("s_weapon_status", iClip);
+	GET_OFFSET("CBasePlayer", m_iFreeSlots);
+	int status = m_weaponStatus + weapon * TS_WEAPON_STATUS_SIZE;
+	if (!get_pdata<bool>(pGun, status + bOwned))
+		return 0;
+	int slots = (ammo - get_pdata<int>(pGun, status + iClip)) * weaponUnitSlots[weapon];
+	int freeSlots = get_pdata<int>(pPlayer->pEdict, m_iFreeSlots);
+	if (slots > freeSlots)
+		return 0;
+	set_pdata<int>(pPlayer->pEdict, m_iFreeSlots, freeSlots - slots);
+	set_pdata<int>(pGun, status + iClip, ammo);
+	return 1;
+END_USER_FUNC()
+
 static cell AMX_NATIVE_CALL set_user_cash(AMX *amx, cell *params)
 {
 	int id = params[1];
@@ -553,6 +669,8 @@ AMX_NATIVE_INFO base_Natives[] = {
 	{ "ts_wpnlogtoid", wpnlog_to_id },
 	
 	{ "ts_getuserwpn", ts_get_user_weapon },
+	{ "ts_getuserammo", get_user_ammo },
+	{ "ts_setuserammo", set_user_ammo },
 	{ "ts_getusercash", get_user_cash },
 	{ "ts_setusercash", set_user_cash },
 	{ "ts_getuserspace", get_user_space },

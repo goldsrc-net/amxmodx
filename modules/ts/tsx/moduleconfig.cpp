@@ -45,6 +45,9 @@ int gmsgPwUp;
 
 RankSystem g_rank;
 
+IGameConfig *CommonConfig;
+IGameConfigManager *ConfigManager;
+
 cvar_t init_tsstats_maxsize ={"tsstats_maxsize","3500", 0 , 3500.0 };
 cvar_t init_tsstats_reset ={"tsstats_reset","0"};
 cvar_t init_tsstats_rank ={"tsstats_rank","0"};
@@ -340,6 +343,15 @@ void OnAmxxAttach()
 	MF_AddNatives( stats_Natives );
 	MF_AddNatives( base_Natives );
 
+	ConfigManager = MF_GetConfigManager();
+
+	char error[256] = "";
+
+	if (!ConfigManager->LoadGameConfigFile("common.games", &CommonConfig, error, sizeof(error)) && *error)
+	{
+		MF_Log("Could not read common.games gamedata: %s", error);
+	}
+
 	const char* path =  get_localinfo("tsstats_score","addons/amxmodx/data/tsstats.amxx");
 	if ( path && *path ) 
 	{
@@ -356,4 +368,6 @@ void OnAmxxDetach()
 {
 	g_rank.clear();
 	g_rank.unloadCalc();
+
+	ConfigManager->CloseGameConfigFile(CommonConfig);
 }

@@ -18,6 +18,8 @@
 #include "amxxmodule.h"
 #include "CMisc.h"
 #include "CRank.h"
+#include <IGameConfigs.h>
+#include <HLTypeConversion.h>
 
 #define RANK_SVERSION "0.2"
 
@@ -95,6 +97,21 @@ struct weapon_t {
 extern int gKnifeOffset;
 
 extern weapon_t weaponData[TSMAX_WEAPONS];
+
+extern IGameConfig *CommonConfig;
+
+#define GET_OFFSET(classname, member)												\
+	static int member = -1;															\
+	if (member == -1)																\
+	{                                                                               \
+		TypeDescription type;                                                       \
+		if (!CommonConfig || !CommonConfig->GetOffsetByClass(classname, #member, &type) || type.fieldOffset < 0)\
+		{																			\
+			MF_LogError(amx, AMX_ERR_NATIVE, "Invalid %s offset. Native %s is disabled", #member, __FUNCTION__);\
+			return 0;																\
+		}																			\
+		member = type.fieldOffset;                                                  \
+	}
 
 bool isModuleActive();
 bool ignoreBots (edict_t *pEnt, edict_t *pOther = NULL);

@@ -25,10 +25,12 @@ folder_list = [
     'base/addons/amxmodx/data/gamedata/common.games/entities.games/tfc',
     'base/addons/amxmodx/data/gamedata/common.games/entities.games/gearbox',
     'base/addons/amxmodx/data/gamedata/common.games/entities.games/valve',
+    'base/addons/amxmodx/data/gamedata/common.games/entities.games/ts',
     'base/addons/amxmodx/data/gamedata/common.games/hostages.games',
     'base/addons/amxmodx/data/gamedata/common.games/hostages.games/cstrike',
     'base/addons/amxmodx/data/gamedata/common.games/others.games',
     'base/addons/amxmodx/data/gamedata/common.games/others.games/cstrike',
+    'base/addons/amxmodx/data/gamedata/common.games/others.games/ts',
     'base/addons/amxmodx/data/gamedata/common.games/gamerules.games',
     'base/addons/amxmodx/data/gamedata/common.games/gamerules.games/cstrike',
     'base/addons/amxmodx/data/gamedata/common.games/gamerules.games/dod',
@@ -519,6 +521,12 @@ CopyFiles('gamedata/common.games/others.games/cstrike', 'base/addons/amxmodx/dat
     'offsets-csound.txt',
     'offsets-cunifiedsignals.txt',
     'offsets-cvoicegamemgr.txt',
+  ]
+)
+
+CopyFiles('gamedata/common.games/others.games/ts', 'base/addons/amxmodx/data/gamedata/common.games/others.games/ts',
+  [
+    'offsets-s_weapon_status.txt',
   ]
 )
 
@@ -1309,6 +1317,13 @@ CopyFiles('gamedata/common.games/entities.games/valve', 'base/addons/amxmodx/dat
     'offsets-cxenplight.txt',
     'offsets-cxentree.txt',
     'offsets-czombie.txt',
+  ]
+)
+
+CopyFiles('gamedata/common.games/entities.games/ts', 'base/addons/amxmodx/data/gamedata/common.games/entities.games/ts',
+  [
+    'offsets-cbaseplayer.txt',
+    'offsets-ctsgun.txt',
   ]
 )
 

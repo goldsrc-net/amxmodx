@@ -71,6 +71,17 @@ native ts_setuserslots( index, slots );
 
 native ts_getuserstate( index );
 native ts_getuserwpn( index,&clip=0,&ammo=0,&mode=0,&extra=0 );
+
+/* Gets or sets a player's ammo for a weapon, by The Specialists 3.0 weapon id (36 is the
+ * Contender there; kung fu has no ammo): for a gun, the spare rounds of its caliber, which every
+ * gun of that caliber reloads from; for the grenade and the knives, how many the player carries
+ * (at least 1, only if he has the weapon, and each one takes free slots).
+ * The player's HUD follows as it does for the game's own changes.
+ * ts_setuserammo returns 1 if it set the amount, 0 otherwise (the player has no gun or not that
+ * grenade or knife, not enough free slots, a weapon without ammo). */
+native ts_getuserammo( index,weapon );
+native ts_setuserammo( index,weapon,ammo );
+
 native ts_getuserspace( index );
 
 native ts_getuserkillflags(killer);
