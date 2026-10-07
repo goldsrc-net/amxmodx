@@ -45,6 +45,28 @@ void FreeDatabase(void *p, unsigned int num)
 	db->FreeHandle();
 }
 
+/**
+ * MF_FormatAmxString formats into a 4096-byte buffer. A string that needs no formatting (no
+ * format specifier, or "%s" with one argument) is read as it is, so it can be as long as any
+ * string (MAX_BUFFER_LENGTH).
+ */
+static char *FormatLongAmxString(AMX *amx, cell *params, int startParam, int *len)
+{
+	cell numparams = params[0] / sizeof(cell);
+	char *fmt = MF_GetAmxString(amx, params[startParam], 0, len);
+
+	if (numparams == startParam && !strchr(fmt, '%'))
+	{
+		return fmt;
+	}
+	if (numparams == startParam + 1 && strcmp(fmt, "%s") == 0)
+	{
+		return MF_GetAmxString(amx, params[startParam + 1], 1, len);
+	}
+
+	return MF_FormatAmxString(amx, params, startParam, len);
+}
+
 static cell AMX_NATIVE_CALL SQL_MakeDbTuple(AMX *amx, cell *params)
 {
 	SQL_Connection *sql = new SQL_Connection;
@@ -131,7 +153,7 @@ static cell AMX_NATIVE_CALL SQL_PrepareQuery(AMX *amx, cell *params)
 	}
 
 	int len;
-	char *fmt = MF_FormatAmxString(amx, params, 2, &len);
+	char *fmt = FormatLongAmxString(amx, params, 2, &len);
 
 	IQuery *pQuery = pDb->PrepareQuery(fmt);
 	if (!pQuery)
@@ -563,7 +585,7 @@ static cell AMX_NATIVE_CALL SQL_QuoteString(AMX *amx, cell *params)
 static cell AMX_NATIVE_CALL SQL_QuoteStringFmt(AMX *amx, cell *params)
 {
 	int len;
-	char *str = MF_FormatAmxString(amx, params, 4, &len);
+	char *str = FormatLongAmxString(amx, params, 4, &len);
 	size_t newsize;
 	static char buffer[8192];
 
