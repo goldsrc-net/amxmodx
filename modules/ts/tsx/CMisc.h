@@ -88,7 +88,9 @@ struct CPlayer {
 	bool deathDouble;
 	int deathSpree;
 	int deathKillerSpree;
+	bool deathScores; // the kill was worth points (no team kill, and in The One mode a kill by the One)
 	bool died; // since his last spawn, which is when the game clears his streak
+	bool theOne; // The One mode: he is the One (his team is "The ONE")
 
 	bool ingame;
 	float clearStats;

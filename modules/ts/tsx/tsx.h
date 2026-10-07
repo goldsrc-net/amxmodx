@@ -57,6 +57,7 @@ void Client_ResetHUD_End(void*);
 void Client_WeaponInfo(void*);
 void Client_ClipInfo(void*);
 void Client_ScoreInfo(void*);
+void Client_TeamInfo(void*);
 void Client_TSHealth_End(void*);
 void Client_TSState(void*);
 void Client_WStatus(void* mValue);

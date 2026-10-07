@@ -46,6 +46,15 @@ static bool TeamAttack(CPlayer* pVictim, CPlayer* pAttacker)
 	return pVictim->teamId == pAttacker->teamId;
 }
 
+// Whether pAttacker's kill of pVictim is worth points: no team kill, and in The One mode only the
+// One scores (TSGetPointsForFrag, 0x791cd, gives anyone else 0). A kill of the One is no team kill
+// but scores nothing; it makes its killer the One after the game has scored it (TheOneIsDead,
+// 0x6b258, called at 0x7a2fa).
+static bool Scores(CPlayer* pVictim, CPlayer* pAttacker)
+{
+	return !TeamAttack(pVictim, pAttacker) && ( !is_theonemode || pAttacker->theOne );
+}
+
 // What PlayerKilled (0x795e4) reads before it sends the DeathMsg: every kill of another player
 // counts in the killer's streak, up to 255 (0x797ea), points or not; a kill worth points is a
 // double kill within 2 seconds of his last one (0x79797), and the game then forgets that last
@@ -56,6 +65,7 @@ static void CountKill(CPlayer* pKiller, CPlayer* pVictim, bool scores)
 	if ( pKiller->killingSpree < 255 )
 		pKiller->killingSpree++;
 	pVictim->deathKillerSpree = pKiller->killingSpree;
+	pVictim->deathScores = scores;
 	pVictim->deathDouble = false;
 	if ( scores ){
 		pVictim->deathDouble = gpGlobals->time - pKiller->lastKill < 2.0;
@@ -99,6 +109,22 @@ void Client_ScoreInfo(void* mValue)
 		if ( iId && (iId < 33) ){
 			GET_PLAYER_POINTER_I(iId)->teamId = *(int*)mValue;
 		}
+		break;
+	}
+}
+
+// In The One mode the One is alone on the team SetTeamList (0x680dc) names "The ONE"; the game sends
+// a TeamInfo when a player becomes the One or stops being it (ChangePlayerTeam, 0xd488c).
+void Client_TeamInfo(void* mValue)
+{
+	static int iId;
+	switch(mState++){
+	case 0:
+		iId = *(int*)mValue;
+		break;
+	case 1:
+		if ( iId >= 1 && iId <= gpGlobals->maxClients )
+			GET_PLAYER_POINTER_I(iId)->theOne = is_theonemode && !strcmp( (char*)mValue, "The ONE" );
 		break;
 	}
 }
@@ -201,7 +227,8 @@ void Client_TSHealth_End(void* mValue){
 
 	// death
 
-    if ( (int)pAttacker->pEdict->v.frags - pAttacker->frags == 0 ) // nie bylo fraga ? jest tak dla bledu z granatem ..
+	// A kill the game named in its DeathMsg is his, even one worth nothing (The One mode).
+	if ( mPlayer->deathKiller != pAttacker->index && (int)pAttacker->pEdict->v.frags - pAttacker->frags == 0 ) // nie bylo fraga ? jest tak dla bledu z granatem ..
 		pAttacker = mPlayer;
 
 	int killFlags = 0;
@@ -210,15 +237,16 @@ void Client_TSHealth_End(void* mValue){
 	// stunt was read there, when the game scored it.
 	bool deathMsg = mPlayer->deathKiller == pAttacker->index;
 	if ( !mPlayer->deathKiller && mPlayer != pAttacker ) // no DeathMsg: count the kill now
-		CountKill(pAttacker, mPlayer, !TA);
+		CountKill(pAttacker, mPlayer, Scores(mPlayer, pAttacker));
 	else if ( !deathMsg ){ // it named someone else
 		mPlayer->deathDouble = false;
 		mPlayer->deathSpree = 0;
 		mPlayer->deathKillerSpree = 0;
+		mPlayer->deathScores = Scores(mPlayer, pAttacker);
 	}
 	mPlayer->deathKiller = 0;
 
-	if ( !TA && mPlayer!=pAttacker ) {
+	if ( !TA && mPlayer!=pAttacker && mPlayer->deathScores ) {
 		int stuntKill = 0;
 
 		if ( weapon == 24 ) // dla granata nie liczy sie sflags
@@ -259,6 +287,16 @@ void Client_TSHealth_End(void* mValue){
 				pAttacker->lastFrag += (int)pAttacker->pEdict->v.frags - pAttacker->frags;
 				pAttacker->frags = (int)pAttacker->pEdict->v.frags;
 			}
+	}
+	else if ( mPlayer!=pAttacker ) {
+		// A team kill is -1 (CHalfLifeTeamplay::IPointsForKill, 0xd53a4), and in The One mode a kill
+		// by anyone but the One is nothing, stunt or not (TSGetPointsForFrag, 0x791cd).
+		pAttacker->lastFrag = TA ? -1 : 0;
+		pAttacker->frags += pAttacker->lastFrag;
+		if ( pAttacker->frags != pAttacker->pEdict->v.frags ){
+			pAttacker->lastFrag += (int)pAttacker->pEdict->v.frags - pAttacker->frags;
+			pAttacker->frags = (int)pAttacker->pEdict->v.frags;
+		}
 	}
 
 	pAttacker->killFlags = killFlags;
@@ -342,11 +380,15 @@ void Client_DeathMsg(void* mValue)
 			pVictim->deathKungFu = strcmp( (char*)mValue, "Kung Fu" ) == 0;
 			pVictim->deathStunt = 0;
 			pVictim->died = true;
+			pVictim->deathScores = false;
 			if ( iKiller >= 1 && iKiller <= gpGlobals->maxClients && iKiller != iVictim ){
 				CPlayer* pKiller = GET_PLAYER_POINTER_I(iKiller);
 				pVictim->deathStunt = StuntFlags( pKiller->pEdict );
-				CountKill( pKiller, pVictim, !TeamAttack(pVictim, pKiller) );
+				CountKill( pKiller, pVictim, Scores(pVictim, pKiller) );
 			}
+			// The One dies: the game clears his streak then (0x7a2ff), however he died.
+			if ( pVictim->theOne )
+				pVictim->killingSpree = 0;
 		}
 		break;
 	}

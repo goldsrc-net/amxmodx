@@ -35,6 +35,7 @@ int gmsgResetHUD;
 int gmsgWeaponInfo;
 int gmsgClipInfo;
 int gmsgScoreInfo;
+int gmsgTeamInfo;
 int gmsgTSHealth;
 int gmsgTSState;
 
@@ -73,6 +74,7 @@ struct sUserMsg
 	{ "WeaponInfo",&gmsgWeaponInfo,Client_WeaponInfo,false },
 	{ "ClipInfo",&gmsgClipInfo,Client_ClipInfo,false },
 	{ "ScoreInfo",&gmsgScoreInfo,Client_ScoreInfo,false },
+	{ "TeamInfo",&gmsgTeamInfo,Client_TeamInfo,false },
 	{ "TSHealth",&gmsgTSHealth,Client_TSHealth_End,true },
 	{ "TSState",&gmsgTSState,Client_TSState,false },
 	{ "WStatus",&gmsgWStatus,Client_WStatus,false },
@@ -137,7 +139,10 @@ void check_stunts(edict_s *player)
 void ServerActivate_Post( edict_t *pEdictList, int edictCount, int clientMax )
 {
 
-	is_theonemode =	(int)CVAR_GET_FLOAT("mp_theonemode") ? true:false;
+	// The game reads mp_theonemode when the map starts (DecideGamePlay, 0x667ac), before server.cfg
+	// runs again, so the cvar may already say otherwise; the game's description says what it plays.
+	const char *description = MDLL_GetGameDescription();
+	is_theonemode = description && !strcmp(description, "The Specialists (The One)");
 
 	rankBots = (int)tsstats_rankbots->value ? true:false;
 

@@ -79,6 +79,7 @@ void CPlayer::PutInServer()
 }
 void CPlayer::Connect(const char* ippp)
 {
+	theOne = false;
 	strcpy(ip,ippp);
 	// Strip the port from the ip
 	for (size_t i = 0; i < sizeof(ip); i++)
@@ -108,6 +109,7 @@ void CPlayer::Init( int pi, edict_t* pe )
 	current = 0;
 	clearStats = 0.0f;
 	ingame = false;
+	theOne = false;
 	speedActive = false;
 	speedBy = 0;
 	speedEntityCount = 0;
