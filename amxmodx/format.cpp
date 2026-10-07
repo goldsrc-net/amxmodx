@@ -206,7 +206,7 @@ void AddString(U **buf_p, size_t &maxlen, const S *string, int width, int prec)
 		size = maxlen;
 
 	/* If precision is provided, make sure we don't truncate a multi-byte character */
-	if (prec >= size && (string[size - 1] & 1 << 7))
+	if (prec >= size && size > 0 && (string[size - 1] & 1 << 7))
 	{
 		size -= UTIL_CheckValidChar((cell *)string + size - 1);
 	}

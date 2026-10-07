@@ -127,7 +127,7 @@ int set_amxstring_utf8(AMX *amx, cell amx_addr, const T *source, size_t sourcele
 		*dest++ = *(unsigned char*)source++;
 	}
 
-	if (needtocheck && (start[len - 1] & 1 << 7))
+	if (needtocheck && len > 0 && (start[len - 1] & 1 << 7))
 	{
 		len -= UTIL_CheckValidChar(start + len - 1);
 	}

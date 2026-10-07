@@ -623,7 +623,7 @@ char *UTIL_ReplaceEx(char *subject, size_t maxLen, const char *search, size_t se
 						strncopy(ptr, replace, replaceLen + 1);
 
 						/* Don't truncate a multi-byte character */
-						if (*(ptr + replaceLen - 1) & 1 << 7)
+						if (replaceLen > 0 && *(ptr + replaceLen - 1) & 1 << 7)
 						{
 							replaceLen -= UTIL_CheckValidChar(ptr + replaceLen - 1);
 							*(ptr + replaceLen) = '\0';
