@@ -32,6 +32,7 @@
 #define M61			24
 #define KNIFE		25
 #define SEALKNIFE	35
+#define MK23		9
 
 new g_Clip
 new g_Other
@@ -221,6 +222,29 @@ public hoard_fewer(id)
 	bench_pass()
 }
 
+// --- what ts_giveweapon gives ----------------------------------------------------------------
+
+public test_giveweapon_gives_the_clips_asked()
+{
+	new id = bench_puppet("given")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "given_spawned", 20.0, "respawn")
+}
+
+public given_spawned(id)
+{
+	// The extra clips are rounds for an empty reserve of the weapon's caliber.
+	ts_giveweapon(id, GLOCK18, 2, 0)
+	ASSERT_EQ(ts_getuserammo(id, GLOCK18), 2)
+	// None asked, none given.
+	ts_giveweapon(id, DEAGLE, 0, 0)
+	ASSERT_EQ(ts_getuserammo(id, DEAGLE), 0)
+	// A reserve that is not empty gets nothing.
+	ts_giveweapon(id, BERETTA, 5, 0)
+	ASSERT_EQ(ts_getuserammo(id, BERETTA), 2)
+	bench_pass()
+}
+
 // --- the grenade and the knives --------------------------------------------------------------
 
 public test_grenades_count_in_the_clip_and_hold_slots()
@@ -372,6 +396,29 @@ public unarmed_spawned(id)
 	ts_giveweapon(id, SEALKNIFE, 1, 0)
 	ASSERT_EQ(ts_setuserammo(id, SEALKNIFE, 0), 0)
 	ASSERT_EQ(ts_getuserammo(id, SEALKNIFE), 1)
+	bench_pass()
+}
+
+public test_kung_fu_shows_no_reserve()
+{
+	new id = bench_puppet("fists")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "fists_spawned", 20.0, "respawn")
+}
+
+public fists_spawned(id)
+{
+	// Kung fu has no caliber, so rounds for another one do not show while it is out.
+	ASSERT_EQ(ts_setuserammo(id, MK23, 40), 1)
+	bench_next("fists_shown", 0.5, id)
+}
+
+public fists_shown(id)
+{
+	// The game sent the player's HUD no reserve of 40.
+	new BenchMsg:msg = BenchMsg:0
+	while ((msg = bench_msg_next(id, msg, "WeaponInfo")) != BenchMsg:0)
+		ASSERT(bench_msg_int(msg, 2) != 40)
 	bench_pass()
 }
 
