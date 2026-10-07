@@ -239,7 +239,7 @@ static cell AMX_NATIVE_CALL get_statsnum(AMX *amx, cell *params)
 }
 
 
-static cell AMX_NATIVE_CALL register_cwpn(AMX *amx, cell *params){ // name,logname,melee=0 
+static cell AMX_NATIVE_CALL register_cwpn(AMX *amx, cell *params){ // name,melee=0,logname 
 	int i;
 	bool bFree = false;
 	for ( i=TSMAX_WEAPONS-TSMAX_CUSTOMWPNS;i<TSMAX_WEAPONS;i++){
@@ -254,8 +254,10 @@ static cell AMX_NATIVE_CALL register_cwpn(AMX *amx, cell *params){ // name,logna
 
 	int iLen;
 	char *szName = MF_GetAmxString(amx, params[1], 0, &iLen);
+	char *szLog = MF_GetAmxString(amx, params[3], 1, &iLen);
 
-	strcpy(weaponData[i].name,szName);
+	snprintf(weaponData[i].name, sizeof(weaponData[i].name), "%s", szName);
+	snprintf(weaponData[i].logname, sizeof(weaponData[i].logname), "%s", szLog);
 	weaponData[i].custom = true;
 	weaponData[i].melee = params[2] ? true:false;
 	return i;
