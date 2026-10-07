@@ -12,6 +12,8 @@
 // game's own (kung fu 0, the Contender 36, the Akimbo Skorpions 37) in ts_getuserwpn, the kill
 // and damage forwards and the stats, and 38 for a thrown knife, which the game has no id for.
 // Kung fu's own stats sit in a slot of their own, as slot 0 of the stats holds every weapon's.
+// Kills made in a dive are scored as the game scores them (TSGetPointsForFrag): a point more and
+// the stunt flag, the weapon still the one that killed.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -26,6 +28,7 @@
 #define GLOCK18		1
 #define SKORPION	17
 #define KNIFE		25
+#define TS_DIVE		0x10	// pev->iuser4 while the game's dive lasts (CTSStunt::GoDive)
 
 new g_Victim
 new g_Weapon
@@ -34,6 +37,9 @@ new Float:g_Distance
 new g_DeathWeapon
 new g_DeathKiller
 new g_DamageWeapon
+new bool:g_Dive
+new g_DiveFrame
+new g_DeathStunt
 
 public plugin_init()
 {
@@ -46,6 +52,8 @@ public bench_setup()
 	g_DeathWeapon = -1
 	g_DeathKiller = 0
 	g_DamageWeapon = -1
+	g_Dive = false
+	g_DeathStunt = 0
 }
 
 public bench_teardown()
@@ -61,6 +69,8 @@ public client_death(killer, victim, wpnindex, hitplace, TK)
 	{
 		g_DeathKiller = killer
 		g_DeathWeapon = wpnindex
+		// The killer's stunt bits at the kill.
+		g_DeathStunt = pev(killer, pev_iuser4)
 	}
 }
 
@@ -317,6 +327,39 @@ public test_contender_kill()
 	StartDuel()
 }
 
+// The killer runs at the victim, dives (+alt1 while running) and shoots him in the air. The game
+// scores 2: the gun's point and one for the dive. TSX added 2 for a stunt it recognised by the exact
+// value of iuser4, so it either missed the dive or expected 3, and called the kill kung fu.
+public test_gun_kill_in_a_dive()
+{
+	g_Weapon = GLOCK18
+	g_Buttons = IN_ATTACK
+	g_Distance = 300.0
+	g_Dive = true
+	StartDuel()
+}
+
+// A knife thrown in a dive: the thrown knife's 2 and one for the dive.
+public test_thrown_knife_kill_in_a_dive()
+{
+	g_Weapon = KNIFE
+	g_Buttons = IN_ATTACK2
+	g_Distance = 300.0
+	g_Dive = true
+	StartDuel()
+}
+
+// Kung fu in a dive is close combat, which the game gives no stunt point (2, as on the ground) but
+// still calls a stunt kill.
+public test_kung_fu_kill_in_a_dive()
+{
+	g_Weapon = TSW_KUNG_FU
+	g_Buttons = IN_ATTACK
+	g_Distance = 150.0
+	g_Dive = true
+	StartDuel()
+}
+
 StartDuel()
 {
 	new victim = bench_puppet("victim")
@@ -367,8 +410,45 @@ public duel_ready(killer)
 
 public duel_attack(killer)
 {
+	if (g_Dive)
+	{
+		// A dive needs speed (80 units a second) and +alt1 pressed, not held.
+		bench_puppet_input(killer, 0, 400.0)
+		bench_next("duel_dive", 0.3, killer)
+		return
+	}
 	bench_puppet_input(killer, g_Buttons)
 	bench_wait_until("victim_dead", "duel_over", 5.0, killer)
+}
+
+public duel_dive(killer)
+{
+	bench_puppet_input(killer, IN_ALT1, 400.0)
+	bench_wait_until("diving", "duel_dive_attack", 2.0, killer)
+}
+
+public bool:diving(killer)
+{
+	return (pev(killer, pev_iuser4) & TS_DIVE) != 0
+}
+
+public duel_dive_attack(killer)
+{
+	g_DiveFrame = 0
+	bench_wait_until("dive_attacking", "duel_over", 2.0, killer)
+}
+
+// Aims at the victim each frame of the dive and presses the attack every other frame (a pistol
+// fires once a press), until he is dead.
+public bool:dive_attacking(killer)
+{
+	if (!is_user_alive(g_Victim))
+		return true
+	new Float:target[3]
+	pev(g_Victim, pev_origin, target)
+	bench_puppet_look_at(killer, target)
+	bench_puppet_input(killer, (g_DiveFrame++ & 1) ? 0 : g_Buttons, 400.0)
+	return false
 }
 
 public bool:victim_dead(killer)
@@ -423,6 +503,11 @@ public duel_counted(killer)
 				copy(name, charsmax(name), "Contender G2")
 				copy(deathmsg, charsmax(deathmsg), "Contender G2")
 			}
+			else if (g_Weapon == GLOCK18)
+			{
+				copy(name, charsmax(name), "Glock-18")
+				copy(deathmsg, charsmax(deathmsg), "Glock-18")
+			}
 			else
 			{
 				// TSX still names it after its TS 2 placeholder.
@@ -439,6 +524,25 @@ public duel_counted(killer)
 	ASSERT_STR_EQ(WeaponName(g_DeathWeapon), name)
 	ASSERT(slot > 0)
 	ASSERT_STR_EQ(WeaponName(slot), name)
+	// The points: 2 for kung fu and a thrown knife, 1 for the rest, and a point more for a stunt,
+	// except in close combat. The killer started with none.
+	new points = (weapon == TSW_KUNG_FU || weapon == TSW_TKNIFE) ? 2 : 1
+	if (g_Dive)
+	{
+		// The game saw the dive when it scored the kill, and said so to everyone.
+		ASSERT(g_DeathStunt & TS_DIVE)
+		ASSERT_MSG(killer, "TSMessage", "#TS_StStl")
+		if (weapon != TSW_KUNG_FU)
+			points++
+		ASSERT_EQ(ts_getuserkillflags(killer), TSKF_STUNTKILL)
+	}
+	else
+	{
+		ASSERT_EQ(bench_msg_count(killer, "TSMessage", "#TS_StStl"), 0)
+		ASSERT_EQ(ts_getuserkillflags(killer), 0)
+	}
+	ASSERT_EQ(get_user_frags(killer), points)
+	ASSERT_EQ(ts_getuserlastfrag(killer), points)
 	// The killer's stats against the victim name the weapon of the kill.
 	new vname[32]
 	ASSERT_EQ(get_user_vstats(killer, g_Victim, stats, body, vname, charsmax(vname)), 1)

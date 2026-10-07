@@ -21,11 +21,29 @@ static inline int StatsSlot(int weapon)
 	return weapon == TSWEAPON_KUNGFU ? TSWEAPON_KUNGFU_STATS : weapon;
 }
 
+// The game's stunt bits in pev->iuser4 that TSGetPointsForFrag (0x79140) reads: a dive (0x10), a
+// cartwheel (0x400, 0x800) or a wall jump (0x10000) is a stunt, a slide (0x20) with friction under 1
+// is a slide. Either counts only while the killer moves faster than 80 units a second.
+#define TS_STUNT_BITS	0x10c10
+#define TS_SLIDE_BIT	0x20
+
+static int StuntFlags(edict_t *pKiller)
+{
+	if ( pKiller->v.velocity.Length() <= 80.0f )
+		return 0;
+	if ( pKiller->v.iuser4 & TS_STUNT_BITS )
+		return TSKF_STUNTKILL;
+	if ( (pKiller->v.iuser4 & TS_SLIDE_BIT) && pKiller->v.friction < 1.0f )
+		return TSKF_SLIDINGKILL;
+	return 0;
+}
+
 
 void Client_ResetHUD_End(void* mValue)
 {
 	if ( mPlayer->IsAlive() ){ // ostatni przed spawn'em 
 		mPlayer->clearStats = gpGlobals->time + 0.25f; // teraz czysc statystyki 
+		mPlayer->deathKiller = 0;
 	}
 	else { // dalej "dead" nie czysc statystyk!
 		mPlayer->items = 0;
@@ -162,26 +180,28 @@ void Client_TSHealth_End(void* mValue){
 
 	int killFlags = 0;
 
+	// The game named kung fu in its DeathMsg when the kill was close combat, and the killer's
+	// stunt was read there, when the game scored it.
+	bool deathMsg = mPlayer->deathKiller == pAttacker->index;
+	mPlayer->deathKiller = 0;
+
 	if ( !TA && mPlayer!=pAttacker ) {
-		int sflags = pAttacker->pEdict->v.iuser4;
-	
 		int stuntKill = 0;
-		int slpos = 0;
 
 		if ( weapon == 24 ) // dla granata nie liczy sie sflags
 			; // nic nie rob..
-		else if ( sflags == 20 || sflags == 1028 || sflags == 2052 )
-			stuntKill = 1;
-		else if ( sflags == 36)
-			slpos = 1;
+		else {
+			stuntKill = deathMsg ? mPlayer->deathStunt : StuntFlags(pAttacker->pEdict);
+			if ( deathMsg && mPlayer->deathKungFu )
+				weapon = TSWEAPON_KUNGFU;
+		}
 
 		int doubleKill = 0;
 		
 		if ( gpGlobals->time - pAttacker->lastKill < 1.0 )
 			doubleKill = 1;
 		
-		if ( stuntKill )
-			killFlags |= TSKF_STUNTKILL;
+		killFlags |= stuntKill;
 		
 		pAttacker->lastKill = gpGlobals->time;
 	
@@ -190,7 +210,8 @@ void Client_TSHealth_End(void* mValue){
 		if ( pAttacker->killingSpree == 10 )
 			pAttacker->is_specialist = 1;
 	
-		pAttacker->lastFrag = weaponData[weapon].bonus + 2*stuntKill;
+		// A stunt or a slide is a point more, but not in close combat, which kung fu always is.
+		pAttacker->lastFrag = weaponData[weapon].bonus + ( (stuntKill && weapon != TSWEAPON_KUNGFU) ? 1 : 0 );
 
 		if ( doubleKill ){
 			pAttacker->lastFrag *= 2;
@@ -209,10 +230,7 @@ void Client_TSHealth_End(void* mValue){
 
 		pAttacker->frags += pAttacker->lastFrag; 
 			if ( pAttacker->frags != pAttacker->pEdict->v.frags ){
-				// moze to sliding kill ?
-				if ( slpos )
-					killFlags |= TSKF_SLIDINGKILL;	
-				else  // moze to kung fu z bronia ?
+				if ( !deathMsg ) // moze to kung fu z bronia ?
 					weapon = TSWEAPON_KUNGFU;
 				pAttacker->lastFrag += (int)pAttacker->pEdict->v.frags - pAttacker->frags;
 				pAttacker->frags = (int)pAttacker->pEdict->v.frags;
@@ -276,6 +294,30 @@ void Client_PwUp(void* mValue)
 	case 1:
 		if ( iPwType != TSPWUP_KUNGFU && iPwType != TSPWUP_SJUMP )
 			mPlayer->PwUpValue = *(int*)mValue;
+		break;
+	}
+}
+
+// What killed whom, the way the game tells everyone: the killer, the victim and a weapon name, which is
+// "Kung Fu" for close combat (PlayerKilled, 0x798f0), with any weapon in hand.
+void Client_DeathMsg(void* mValue)
+{
+	static int iKiller;
+	static int iVictim;
+	switch(mState++){
+	case 0:
+		iKiller = *(int*)mValue;
+		break;
+	case 1:
+		iVictim = *(int*)mValue;
+		break;
+	case 2:
+		if ( iVictim >= 1 && iVictim <= gpGlobals->maxClients ){
+			CPlayer* pVictim = GET_PLAYER_POINTER_I(iVictim);
+			pVictim->deathKiller = iKiller;
+			pVictim->deathKungFu = strcmp( (char*)mValue, "Kung Fu" ) == 0;
+			pVictim->deathStunt = ( iKiller >= 1 && iKiller <= gpGlobals->maxClients ) ? StuntFlags( INDEXENT(iKiller) ) : 0;
+		}
 		break;
 	}
 }

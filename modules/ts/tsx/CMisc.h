@@ -79,6 +79,11 @@ struct CPlayer {
 	float lastKill;  // kiedy ostatni , dla double kill
 	//
 	int frags; // suma dla kontroli ostatniego fraga, to - v.frags = lastfrag
+	// The game's DeathMsg for this player's last death: who killed him, whether it names kung fu,
+	// and the TSKF_ stunt flag the killer's movement earned then.
+	int deathKiller;
+	bool deathKungFu;
+	int deathStunt;
 
 	bool ingame;
 	float clearStats;

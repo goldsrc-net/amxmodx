@@ -40,6 +40,7 @@ void CPlayer::PutInServer()
 	PwUp = 0;
 	PwUpValue = 0;
 	killFlags = 0;
+	deathKiller = 0;
 	state = oldstate = checkstate = 0;
 
 	speedActive = false;

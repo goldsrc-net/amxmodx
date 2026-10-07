@@ -42,6 +42,7 @@ int gmsgWStatus;
 int gmsgTSCash;
 int gmsgTSSpace;
 int gmsgPwUp;
+int gmsgDeathMsg;
 
 RankSystem g_rank;
 
@@ -78,6 +79,7 @@ struct sUserMsg
 	{ "TSCash",&gmsgTSCash,Client_TSCash,false },
 	{ "TSSpace",&gmsgTSSpace,Client_TSSpace,false },
 	{ "PwUp",&gmsgPwUp,Client_PwUp,false},
+	{ "DeathMsg",&gmsgDeathMsg,Client_DeathMsg,false },
 
 	{ 0,0,0,false }
 };

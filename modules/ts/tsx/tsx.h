@@ -51,6 +51,7 @@ extern int gmsgWStatus;
 extern int gmsgTSCash;
 extern int gmsgTSSpace;
 extern int gmsgPwUp;
+extern int gmsgDeathMsg;
 
 void Client_ResetHUD_End(void*);
 void Client_WeaponInfo(void*);
@@ -62,6 +63,7 @@ void Client_WStatus(void* mValue);
 void Client_TSCash(void* mValue);
 void Client_TSSpace(void* mValue);
 void Client_PwUp(void* mValue);
+void Client_DeathMsg(void* mValue);
 
 typedef void (*funEventCall)(void*);
 extern funEventCall modMsgsEnd[MAX_REG_MSGS];
