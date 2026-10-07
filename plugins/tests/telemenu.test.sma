@@ -130,6 +130,12 @@ KeyOf(p)
 	return 0
 }
 
+// The Specialists kills a second after a kill (its ClientKill only arms a timer): wait for it.
+public PuppetDead(id)
+{
+	return !is_user_alive(id)
+}
+
 bool:SameOrigin(a, const Float:origin[3])
 {
 	new Float:o[3]
@@ -331,12 +337,16 @@ public test_dead_admin_uses_current_location()
 
 public DeadAdmin_Spawned()
 {
-	new admin = g_P[0], target = g_P[1]
+	new admin = g_P[0]
 	SetFlags(admin, "h")
 	Normalize(admin)
 	user_kill(admin, 1)
-	ASSERT_FALSE(is_user_alive(admin))
+	bench_wait_until("PuppetDead", "DeadAdmin_Dead", 5.0, admin)
+}
 
+public DeadAdmin_Dead(admin)
+{
+	new target = g_P[1]
 	bench_puppet_cmd(admin, "amx_teleportmenu")
 	ASSERT_MENU(admin, "7. Current Location")
 	ASSERT(MenuKeys(admin) & (1 << (KeyOf(target) - 1)))
@@ -366,6 +376,12 @@ public DeadTarget_Spawned()
 	ASSERT_MENU(admin, line)
 
 	user_kill(target, 1)
+	bench_wait_until("PuppetDead", "DeadTarget_Dead", 5.0, target)
+}
+
+public DeadTarget_Dead(target)
+{
+	new admin = g_P[0]
 	new Float:before[3]
 	pev(target, pev_origin, before)
 	bench_puppet_cmd(admin, "menuselect %d", KeyOf(target))

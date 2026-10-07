@@ -299,9 +299,19 @@ public slay(id)
 	bench_puppet_cmd(g_Boss, "amx_slay")
 	ASSERT_MSG(g_Boss, "TextMsg", "Usage:  amx_slay <name or #userid>")
 	bench_puppet_cmd(g_Boss, "amx_slay slayme")
-	ASSERT_FALSE(is_user_alive(g_Target))
 	ASSERT_EQ(CountPrint(g_Boss, print_console, "[AMXX] Client ^"slayme^" slayed"), 1)
 	ASSERT_EQ(CountPrint(g_Target, print_chat, "ADMIN boss: slay slayme"), 1)
+	// The Specialists kills a second after a slay (its ClientKill only arms a timer).
+	bench_wait_until("target_dead", "slain", 5.0)
+}
+
+public target_dead()
+{
+	return !is_user_alive(g_Target)
+}
+
+public slain()
+{
 	// Only the living can be slain.
 	bench_puppet_cmd(g_Boss, "amx_slay slayme")
 	ASSERT_MSG(g_Boss, "TextMsg", "That action can't be performed on dead client ^"slayme^"")

@@ -147,6 +147,12 @@ public first_alive()
 	return all
 }
 
+// The Specialists kills a second after a kill (its ClientKill only arms a timer): wait for it.
+public PuppetDead(id)
+{
+	return !is_user_alive(id)
+}
+
 // Every MOTD text sent to id this test, joined.
 Motd(id, text[], len)
 {
@@ -514,7 +520,14 @@ public test_death_shows_who_and_how()
 	SpawnFirst(2, "death_spawned")
 }
 
+// TSX clears a player's stats a quarter of a second after the spawn's ResetHUD; the hits come after
+// that, or the clear lands while the test waits for the kill.
 public death_spawned()
+{
+	bench_next("death_ready", 0.5)
+}
+
+public death_ready()
 {
 	for (new i = 0; i < 4; i++)
 		set_pev(g_P[i], pev_team, i + 1)
@@ -539,6 +552,11 @@ public death_spawned()
 
 	// The killer's headshot.
 	user_silentkill(g_V)
+	bench_wait_until("PuppetDead", "death_headshot", 5.0, g_V)
+}
+
+public death_headshot()
+{
 	custom_weapon_dmg(g_Gun, g_K, g_V, 80, HIT_HEAD)
 
 	new expected[256]
@@ -661,6 +679,11 @@ public self_spawned()
 	custom_weapon_dmg(g_Gun, a, a, 10, HIT_CHEST)
 	ASSERT_EQ(bench_msg_count(a, "svc_temp_entity", "10"), 0)
 	user_silentkill(a)
+	bench_wait_until("PuppetDead", "self_dead", 5.0, a)
+}
+
+public self_dead(a)
+{
 	custom_weapon_dmg(g_Gun, a, a, 10, HIT_CHEST)
 	ASSERT_EQ(bench_msg_count(a, "svc_temp_entity", "killed you"), 0)
 	bench_pass()
@@ -686,6 +709,12 @@ public mates_spawned()
 	ASSERT_EQ(bench_msg_count(a, "svc_temp_entity", "10"), 0)
 
 	user_silentkill(b)
+	bench_wait_until("PuppetDead", "mate_dead", 5.0, b)
+}
+
+public mate_dead(b)
+{
+	new a = g_P[0], expected[64]
 	custom_weapon_dmg(g_Gun, a, b, 10, HIT_CHEST)
 	formatex(expected, charsmax(expected), "%s killed a teammate !", Name(a))
 	ASSERT_MSG(b, "TextMsg", expected)
@@ -707,7 +736,12 @@ public mute_spawned()
 	new a = g_P[0], b = g_P[1]
 	custom_weapon_dmg(g_Gun, a, b, 10, HIT_CHEST)
 	user_silentkill(b)
-	custom_weapon_dmg(g_Gun, a, b, 10, HIT_CHEST)
+	bench_wait_until("PuppetDead", "mute_dead", 5.0, b)
+}
+
+public mute_dead(b)
+{
+	custom_weapon_dmg(g_Gun, g_P[0], b, 10, HIT_CHEST)
 	ASSERT_EQ(bench_msg_count(b, "TextMsg", "teammate"), 0)
 	bench_pass()
 }

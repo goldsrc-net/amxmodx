@@ -160,6 +160,12 @@ public AllAlive()
 	return ok
 }
 
+// The Specialists kills a second after a kill (its ClientKill only arms a timer): wait for it.
+public PuppetDead(id)
+{
+	return !is_user_alive(id)
+}
+
 SetFlags(id, const flags[])
 {
 	remove_user_flags(id)
@@ -655,12 +661,17 @@ public Slap_Spawned()
 	bench_puppet_cmd(admin, "menuselect 8")
 	ASSERT_MENU(admin, "^n8. Slay^n")
 	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
-	ASSERT_FALSE(is_user_alive(target))
 	ASSERT_MSG(admin, "", "ADMIN pslap1: slay pslap2")
-	ASSERT_MENU(admin, "#. pslap2   ")
+	bench_wait_until("PuppetDead", "Slay_Dead", 5.0, target)
+}
 
+// The menu drawn next greys the slain player.
+public Slay_Dead()
+{
+	new admin = g_P[0]
 	bench_puppet_cmd(admin, "menuselect 8")
 	ASSERT_MENU(admin, "^n8. Slap with 0 damage^n")
+	ASSERT_MENU(admin, "#. pslap2   ")
 	bench_pass()
 }
 
@@ -677,6 +688,12 @@ public SlapDead_Spawned()
 	bench_puppet_cmd(admin, "amx_slapmenu")
 	ASSERT(KeyEnabled(admin, PosOf(target)))
 	user_kill(target, 1)
+	bench_wait_until("PuppetDead", "SlapDead_Dead", 5.0, target)
+}
+
+public SlapDead_Dead()
+{
+	new admin = g_P[0], target = g_P[1]
 	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
 	ASSERT_MSG(admin, "", "That action can't be performed on dead client ^"psdead2^"")
 	ASSERT_EQ(bench_msg_count(admin, "", "slay psdead2"), 0)
@@ -866,8 +883,12 @@ public TeamTransfer_Spawned()
 	new before = bench_msg_count(admin, "ShowMenu")
 	bench_puppet_cmd(admin, "menuselect %d", PosOf(target))
 	ASSERT_MSG(admin, "", "ADMIN ptt1: transfer ptt2 to TERRORIST")
-	ASSERT_FALSE(is_user_alive(target))
 	ASSERT_EQ(bench_msg_count(admin, "ShowMenu"), before + 1)
+	bench_wait_until("PuppetDead", "TeamTransfer_Dead", 5.0, target)
+}
+
+public TeamTransfer_Dead()
+{
 	bench_pass()
 }
 
@@ -886,7 +907,7 @@ public TeamSpec_Spawned()
 	SetFlags(admin, "m")
 	set_pev(target, pev_team, 1)
 	user_kill(target, 1)
-	bench_next("TeamSpec_Killed", 0.1)
+	bench_wait_until("PuppetDead", "TeamSpec_Killed", 5.0, target)
 }
 
 public TeamSpec_Killed()
