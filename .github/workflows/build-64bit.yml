@@ -29,7 +29,7 @@ env:
 jobs:
   build:
     permissions:
-      contents: write
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -269,10 +269,42 @@ jobs:
           name: amxmodx-${{ matrix.platform }}-${{ matrix.target_arch }}
           path: amxmodx/build/release/*
 
-      # Only push to a release on direct 64bit branch pushes,
-      # not PR runs (PRs from forks don't have GITHUB_TOKEN write).
+  # One job publishes the release once every build has uploaded its
+  # artifacts. Each build job used to create the release itself, and
+  # two of them could race to create the same tag ("already_exists").
+  # Only on direct 64bit branch pushes, not PR runs (PRs from forks
+  # don't have GITHUB_TOKEN write).
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/64bit'
+    needs: build
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout AMX Mod X
+        uses: actions/checkout@v6
+        with:
+          path: amxmodx
+          fetch-depth: 0
+
+      - name: Version
+        id: version
+        working-directory: amxmodx
+        shell: bash
+        run: |
+          version_base=$(cat product.version)
+          version_base=${version_base%-dev}
+          echo "version=${version_base}.$(git rev-list --count HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: amxmodx-*
+          path: release
+          merge-multiple: true
+
       - name: Create Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/64bit'
         uses: ncipollo/release-action@v1.21.0
         with:
           allowUpdates: true
@@ -283,11 +315,10 @@ jobs:
           omitPrereleaseDuringUpdate: true
           omitBody: true
 
-          artifacts: amxmodx/build/release/*
-          artifactContentType: ${{ matrix.platform == 'windows' && 'application/zip' || 'application/gzip' }}
+          artifacts: release/*
           artifactErrorsFailBuild: false
 
-          tag: 64bit-${{ steps.package.outputs.version }}
+          tag: 64bit-${{ steps.version.outputs.version }}
           commit: ${{ github.sha }}
           generateReleaseNotes: true
 
