@@ -160,6 +160,21 @@ const char *translate(AMX *amx, const char *lang, const char *key)
 	return def;
 }
 
+// Text held as char (a dictionary entry, a player name) is bytes: copy it to cells as unsigned, so
+// non-ASCII text equals the same text in a plugin's own strings. Through a signed char it became
+// negative on i386 and amd64, and stayed positive on aarch64.
+template <typename D>
+inline D fmt_cast(char c)
+{
+	return static_cast<D>(static_cast<unsigned char>(c));
+}
+
+template <typename D>
+inline D fmt_cast(cell c)
+{
+	return static_cast<D>(c);
+}
+
 template <typename U, typename S>
 void AddString(U **buf_p, size_t &maxlen, const S *string, int width, int prec)
 {
@@ -200,7 +215,7 @@ void AddString(U **buf_p, size_t &maxlen, const S *string, int width, int prec)
 	width -= size;
 
 	while (size--)
-		*buf++ = static_cast<U>(*string++);
+		*buf++ = fmt_cast<U>(*string++);
 
 	while (width-- > 0 && maxlen)
 	{
@@ -568,8 +583,8 @@ size_t atcprintf(D *buffer, size_t maxlen, const S *format, AMX *amx, cell *para
 	while (true)
 	{
 		// run through the format string until we hit a '%' or '\0'
-		for (ch = static_cast<D>(*fmt); 
-			llen && ((ch = static_cast<D>(*fmt)) != '\0' && ch != '%');
+		for (ch = fmt_cast<D>(*fmt); 
+			llen && ((ch = fmt_cast<D>(*fmt)) != '\0' && ch != '%');
 			fmt++)
 		{
 			*buf_p++ = static_cast<D>(ch);
@@ -588,7 +603,7 @@ size_t atcprintf(D *buffer, size_t maxlen, const S *format, AMX *amx, cell *para
 		//sign = '\0';
 
 rflag:
-		ch = static_cast<D>(*fmt++);
+		ch = fmt_cast<D>(*fmt++);
 reswitch:
 		switch(ch)
 		{
@@ -597,7 +612,7 @@ reswitch:
 			goto rflag;
 		case '.':
 			n = 0;
-			while( is_digit( ( ch = static_cast<D>(*fmt++)) ) )
+			while( is_digit( ( ch = fmt_cast<D>(*fmt++)) ) )
 				n = 10 * n + ( ch - '0' );
 			prec = n < 0 ? -1 : n;
 			goto reswitch;
@@ -616,7 +631,7 @@ reswitch:
 			n = 0;
 			do {
 				n = 10 * n + ( ch - '0' );
-				ch = static_cast<D>(*fmt++);
+				ch = fmt_cast<D>(*fmt++);
 			} while( is_digit( ch ) );
 			width = n;
 			goto reswitch;
