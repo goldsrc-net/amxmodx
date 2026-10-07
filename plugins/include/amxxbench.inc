@@ -44,6 +44,23 @@ native bool:bench_check(bool:condition, const what[]);
 // test_menu_opens is reported as "menu opens".
 native bench_describe(const fmt[], any:...);
 
+// The running test changes the map, or makes a plugin change it: the run goes on on the new map by
+// calling step(data) in this test file, reloaded (its variables start over; puppets are gone, as the
+// engine drops fake clients on a map change). A map change no test expects fails the test running.
+native bench_expect_map_change(const step[], data = 0);
+
+// Changes to map (the current one if empty) and goes on with step(data) there.
+stock bench_change_map(const map[], const step[], data = 0)
+{
+	new name[64];
+	if (map[0])
+		copy(name, charsmax(name), map);
+	else
+		get_mapname(name, charsmax(name));
+	bench_expect_map_change(step, data);
+	server_cmd("changelevel %s", name);
+}
+
 // A run time error whose description contains text is part of the running test: it does not fail
 // the test, and the test fails if no such error comes before it ends. For code that must fail.
 native bench_expect_error(const text[]);
