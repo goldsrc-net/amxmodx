@@ -20,9 +20,9 @@
 // - The TSHealth message the game sends after a player is hurt, read with the victim's dmg_take
 //   and dmg_inflictor. Grenades, the kill flags (stunt, sliding, double, specialist) and frag
 //   counts only come this way. The "real damage" tests here hurt the victim with Ham_TakeDamage and
-//   set dmg_take and dmg_inflictor (and, for the kill flags, the killer's stunt state and frags)
-//   from a TSHealth message hook just before TSX reads them, so each hit reaches TSX as the test
-//   chose it.
+//   set dmg_take and dmg_inflictor from a TSHealth message hook just before TSX reads them, so each
+//   hit reaches TSX as the test chose it; a stunt or slide kill gives the killer that move while the
+//   game scores the kill.
 //
 
 #include <amxmodx>
@@ -57,9 +57,6 @@ new g_P[8]
 new g_ShimHook
 new g_PendInflictor[MAX_PLAYERS + 1]
 new Float:g_PendDamage[MAX_PLAYERS + 1]
-new g_PendAttacker[MAX_PLAYERS + 1]
-new g_PendStunt[MAX_PLAYERS + 1]
-new g_PendFrags[MAX_PLAYERS + 1]
 new g_Grenade
 
 public plugin_init()
@@ -203,30 +200,35 @@ public Shim_TSHealth(msgid, dest, id)
 		return PLUGIN_CONTINUE
 	set_pev(id, pev_dmg_take, g_PendDamage[id])
 	set_pev(id, pev_dmg_inflictor, g_PendInflictor[id])
-	new attacker = g_PendAttacker[id]
-	if (g_PendStunt[id])
-		set_pev(attacker, pev_iuser4, g_PendStunt[id])
-	if (g_PendFrags[id])
-	{
-		new Float:frags
-		pev(attacker, pev_frags, frags)
-		set_pev(attacker, pev_frags, frags + float(g_PendFrags[id]))
-	}
 	g_PendDamage[id] = 0.0
 	return PLUGIN_CONTINUE
 }
 
-// Hurts victim the game's way. stunt is the attacker's TS move state (pev_iuser4) TSX should see:
-// 20 is a stunt, 36 a slide. frags adds to the attacker's frags as the game awards, so TSX finds
-// a different count than it expects (what it reads as a slide when the move state says one).
-RealDamage(victim, inflictor, attacker, Float:damage, stunt = 0, frags = 0)
+// Hurts victim the game's way. stunt is the attacker's TS move state (pev_iuser4) while the game
+// scores the kill: 20 is a dive (a stunt), 36 a slide. The game and TSX both read it then
+// (PlayerKilled's TSGetPointsForFrag, TSX at the DeathMsg), and only while he moves faster than 80
+// units a second, with a friction under 1 for a slide, so he is given that for the moment too.
+RealDamage(victim, inflictor, attacker, Float:damage, stunt = 0)
 {
 	g_PendInflictor[victim] = inflictor
 	g_PendDamage[victim] = damage
-	g_PendAttacker[victim] = attacker
-	g_PendStunt[victim] = stunt
-	g_PendFrags[victim] = frags
+	new move, Float:velocity[3], Float:friction
+	if (stunt)
+	{
+		move = pev(attacker, pev_iuser4)
+		pev(attacker, pev_velocity, velocity)
+		pev(attacker, pev_friction, friction)
+		set_pev(attacker, pev_iuser4, stunt)
+		set_pev(attacker, pev_velocity, Float:{200.0, 0.0, 0.0})
+		set_pev(attacker, pev_friction, 0.5)
+	}
 	ExecuteHam(Ham_TakeDamage, victim, inflictor, attacker, damage, DMG_BULLET)
+	if (stunt)
+	{
+		set_pev(attacker, pev_iuser4, move)
+		set_pev(attacker, pev_velocity, velocity)
+		set_pev(attacker, pev_friction, friction)
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -861,7 +863,7 @@ public kf_next()
 	if (g_Kill == 1)
 		RealDamage(victim, k, k, 500.0, 20)		// a stunt
 	else if (g_Kill == 3)
-		RealDamage(victim, k, k, 500.0, 36, 1)	// a slide
+		RealDamage(victim, k, k, 500.0, 36)	// a slide
 	else
 		RealDamage(victim, k, k, 500.0)
 	if (g_Kill == 3)
