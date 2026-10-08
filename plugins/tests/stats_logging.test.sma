@@ -128,7 +128,19 @@ public test_leaving_player_logs_stats()
 	get_user_authid(g_Puppet, g_Auth, charsmax(g_Auth))
 	g_UserId = get_user_userid(g_Puppet)
 
-	// Two shots, one hit in the head for 25. The target never spawned, so the hit kills.
+	// The Specialists spawns a joiner and sends him to spectate on his first frame (TS 3.0 and reTS);
+	// TSX counts a hit as a kill only when the victim is not alive, so wait for that.
+	bench_wait_until("target_down", "hits", 5.0)
+}
+
+public bool:target_down()
+{
+	return !is_user_alive(g_Other)
+}
+
+public hits()
+{
+	// Two shots, one hit in the head for 25. The target is spectating, so the hit kills.
 	set_pev(g_Puppet, pev_team, 1)
 	set_pev(g_Other, pev_team, 2)
 	custom_weapon_shot(g_Gun, g_Puppet)

@@ -9,8 +9,8 @@
 
 //
 // Tests for what the original The Specialists 3.0 does with a player's powerup each frame: a dead
-// player's powerup goes back into the world where he lies, and a running superjump powerup lowers his
-// gravity. ../ts_powerup_state.test.sma is the same on reTS.
+// player's powerup goes back into the world where he lies, so does a spectator's, and a running
+// superjump powerup lowers his gravity. ../ts_powerup_state.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -146,6 +146,32 @@ public holder_holds(id)
 	MarkPowerups()
 	user_kill(id)
 	bench_wait_until("is_dead", "died", 3.0, id)
+}
+
+// A spectator's powerup is handled like a dead player's: slow motion running on a player who has not
+// joined yet goes back into the world where he is.
+public test_spectators_powerup_drops_where_he_is()
+{
+	new id = bench_puppet("watcher")
+	ASSERT(id > 0)
+	bench_next("watcher_spectating", 0.5, id)
+}
+
+public watcher_spectating(id)
+{
+	ASSERT(!is_user_alive(id))
+	ASSERT(pev(id, pev_iuser1) != 0)
+	MarkPowerups()
+	pev(id, pev_origin, g_Corpse)
+	ts_set_fakeslowmo(id, 10.0)
+	bench_next("watcher_after", 0.5, id)
+}
+
+public watcher_after(id)
+{
+	ASSERT_EQ(ts_is_running_powerup(id), 0)
+	ASSERT(NewPowerupAtCorpse() != 0)
+	bench_pass()
 }
 
 // A running superjump powerup, which only a plugin can start, gives low gravity until it ends.

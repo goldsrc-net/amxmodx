@@ -229,6 +229,26 @@ bool:KeyEnabled(id, key)
 	return (MenuKeys(id) & (1 << (key - 1))) != 0
 }
 
+// The team plmenu's team menu sees for p: get_user_team, with no team counted as 3 (spectator).
+MenuTeam(p)
+{
+	new team = get_user_team(p)
+	return team ? team : 3
+}
+
+// The team menu line for p at key: greyed out ("#.") when p is already on the team the transfer goes
+// to (1 TERRORIST, 2 CT, 3 SPECTATOR) or is immune, otherwise its key, with " *" for an admin. Which
+// team a puppet is on depends on the game mode (teamplay puts The Specialists' players on 1 and 2).
+TeamLine(p, key, transferTeam, bool:immune, out[], len)
+{
+	new name[32]
+	get_user_name(p, name, charsmax(name))
+	if (immune || MenuTeam(p) == transferTeam)
+		formatex(out, len, "#. %s   ", name)
+	else
+		formatex(out, len, "%d. %s%s   ", key, name, is_user_admin(p) ? " *" : "")
+}
+
 // Remembers p's auth ID so teardown lifts its ban.
 RememberBan(p)
 {
@@ -788,12 +808,12 @@ public TeamOptions_Spawned()
 	ASSERT_MENU(admin, "Team Menu 1/1^n^n")
 	ASSERT_MENU(admin, "^n7. Silent Transfer: No^n8. Transfer to TERRORIST^n^n0. Exit")
 	new line[32]
-	formatex(line, charsmax(line), "%d. ptm1 *   ", PosOf(admin))
+	TeamLine(admin, PosOf(admin), 1, false, line, charsmax(line))
 	ASSERT_MENU(admin, line)
-	formatex(line, charsmax(line), "%d. ptm2   ", PosOf(target))
+	TeamLine(target, PosOf(target), 1, false, line, charsmax(line))
 	ASSERT_MENU(admin, line)
 	ASSERT_MENU(admin, "#. ptm3   ")
-	ASSERT(KeyEnabled(admin, PosOf(target)))
+	ASSERT_EQ(KeyEnabled(admin, PosOf(target)), MenuTeam(target) != 1)
 	ASSERT_FALSE(KeyEnabled(admin, PosOf(immune)))
 	ASSERT_EQ(MenuKeys(admin) & (MENU_KEY_7|MENU_KEY_8|MENU_KEY_0), MENU_KEY_7|MENU_KEY_8|MENU_KEY_0)
 
@@ -806,8 +826,9 @@ public TeamOptions_Spawned()
 	ASSERT_MENU(admin, "8. Transfer to CT^n")
 	bench_puppet_cmd(admin, "menuselect 8")
 	ASSERT_MENU(admin, "8. Transfer to SPECTATOR^n")
-	ASSERT_MENU(admin, "#. ptm2   ")
-	ASSERT_FALSE(KeyEnabled(admin, PosOf(target)))
+	TeamLine(target, PosOf(target), 3, false, line, charsmax(line))
+	ASSERT_MENU(admin, line)
+	ASSERT_EQ(KeyEnabled(admin, PosOf(target)), MenuTeam(target) != 3)
 	bench_puppet_cmd(admin, "menuselect 8")
 	ASSERT_MENU(admin, "8. Transfer to TERRORIST^n")
 	bench_pass()
@@ -848,8 +869,12 @@ public TeamPages_Spawned()
 	ASSERT_MENU(admin, "Team Menu 1/2^n")
 	ASSERT_MENU(admin, "^n9. More...^n0. Exit")
 	bench_puppet_cmd(admin, "menuselect 9")
-	ASSERT_MENU(admin, "Team Menu 2/2^n^n1. ptp7   ")
-	ASSERT_MENU(admin, "2. ptp8   ")
+	ASSERT_MENU(admin, "Team Menu 2/2^n^n")
+	new line[32]
+	TeamLine(g_P[6], PosOf(g_P[6]) - 6, 1, false, line, charsmax(line))
+	ASSERT_MENU(admin, line)
+	TeamLine(last, PosOf(last) - 6, 1, false, line, charsmax(line))
+	ASSERT_MENU(admin, line)
 	ASSERT_MENU(admin, "^n0. Back")
 	bench_puppet_cmd(admin, "menuselect 10")
 	ASSERT_MENU(admin, "Team Menu 1/2^n")
