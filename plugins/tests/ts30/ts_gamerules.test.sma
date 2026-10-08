@@ -21,7 +21,7 @@
 // ts_mapglobals thinks once. Kevlar leaves the head; the range falloff index is truncated; with
 // every bullet slot in flight the game warns; in The One mode the team list's first name gives way
 // to "The ONE"; a ts_mapglobals keeps its saved fields through Spawn; a bullet in flight ends with
-// the map.
+// the map. A shot under water leaves a truncated count of bubbles.
 // ../ts_gamerules.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -54,6 +54,8 @@ new g_FriendlyFire
 new Float:g_Spot[2][3]
 new g_Developer
 new g_Pressed
+// The bubble trail test watches temporary entities.
+new g_BubbleWatch
 
 public plugin_init()
 {
@@ -66,6 +68,9 @@ public plugin_init()
 	register_forward(FM_EmitSound, "on_sound")
 	register_forward(FM_MessageBegin, "on_message_begin")
 	register_forward(FM_WriteByte, "on_write_byte")
+	register_forward(FM_MessageBegin, "on_bubble_begin")
+	register_forward(FM_WriteByte, "on_bubble_byte")
+	register_forward(FM_WriteCoord, "on_bubble_coord")
 	register_forward(FM_TraceLine, "on_trace", 1)
 	register_forward(FM_TraceLine, "on_trace_falloff", 1)
 }
@@ -84,6 +89,7 @@ public bench_teardown()
 	// the team settings the repeated team name test saved, if it ended before it put them back
 	RestoreTeamCvars()
 	set_cvar_num("realbullet", g_RealBullet)
+	g_BubbleWatch = 0
 	set_cvar_num("mp_friendlyfire", g_FriendlyFire)
 	if (g_Teamplay)
 		set_cvar_num("mp_teamplay", 0)
@@ -169,24 +175,42 @@ public Released(id)
 	bench_next(g_After, 0.0, id)
 }
 
-// Stands a dist units from b's bounds, facing b's middle; the farthest of a few distances there is
-// room for. He looks level, along the line from his eyes that bench_puppet_face found reaches b:
-// aimed down at b's origin instead, a shot can meet a low wall or railing that line passes over.
+// Stands b and a 600 units apart on ts_lobby's long flat floor (z 64) along y 383.9, between the
+// spawn points at -991.9 and -391.9 (a probe found the hull's path and the eye-level line between them
+// clear), a facing b's middle (his origin). Not level from the eyes: a line meets a player's hitboxes,
+// not his box, and a level one at eye height passes over the head in some frames of the pose (on TS
+// 3.0 it missed two runs in six). Returns the distance, or 0 if a's line does not meet b.
 Float:FaceFar(a, b)
 {
-	new Float:dists[] = {600.0, 450.0, 300.0}
-	for (new i = 0; i < sizeof(dists); i++)
-		if (bench_puppet_face(a, b, dists[i]))
-			return dists[i]
-	return 0.0
+	new Float:target[3] = {-991.9, 383.9, 100.0}
+	engfunc(EngFunc_SetOrigin, b, target)
+	engfunc(EngFunc_SetOrigin, a, Float:{-391.9, 383.9, 100.0})
+	set_pev(a, pev_velocity, Float:{0.0, 0.0, 0.0})
+	set_pev(b, pev_velocity, Float:{0.0, 0.0, 0.0})
+	bench_puppet_look_at(a, target)
+	new Float:eye[3], Float:ofs[3], Float:end[3]
+	pev(a, pev_origin, eye)
+	pev(a, pev_view_ofs, ofs)
+	eye[2] += ofs[2]
+	for (new k = 0; k < 3; k++)
+		end[k] = eye[k] + (target[k] - eye[k]) * 1.05
+	new tr = create_tr2()
+	engfunc(EngFunc_TraceLine, eye, end, DONT_IGNORE_MONSTERS, a, tr)
+	new hit = get_tr2(tr, TR_pHit)
+	free_tr2(tr)
+	if (hit != b)
+	{
+		server_print("ts_gamerules: from %.1f %.1f %.1f the line met %d, not %d", eye[0], eye[1], eye[2], hit, b)
+		return 0.0
+	}
+	return 600.0
 }
 
 // ---------------------------------------------------------------------------------------------
 // realbullet: with it on, a bullet flies to its target instead of hitting it the frame it is
 // fired. With realbullet 1 a bullet moves every 0.05 s by that much flight (13200 units a second for
 // the Glock's 9 mm, 660 units a step), starting at the rules' next think, so it hits within 0.03 s
-// (flying a frame at a time, it would take 0.045 s from 600 units, the distance used when there is
-// room).
+// (flying a frame at a time, it would take 0.045 s from 600 units, where the shooter stands).
 
 public test_realbullet_bullets_fly()
 {
@@ -2067,5 +2091,138 @@ public inflight_done(id)
 	ASSERT(is_user_alive(g_P[1]))
 	ASSERT_EQ(floatround(hp[1]), 500)
 	ASSERT_EQ(floatround(hp[0]), 500)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// A shot into water leaves a bubble trail (TE_BUBBLETRAIL) of max travel * fraction / 64 bubbles,
+// truncated (ShootBulletsPlayer @0x5fffb, fistp under a chop control word). A gun does not fire with
+// the shooter's head under water, so he stands on the deck of ts_casa's pool (deck z 144, the pool's
+// wall at x 2176, water from its floor at z 32 up to z 128) and fires a Glock down at a point of the
+// floor 240 units (3.75 x 64) from his eyes: 3 bubbles, where rounding would give 4.
+
+#define BUBBLE_KEY "tsgr_bubbles"
+
+// The bubble trail being sent: -2 none, -1 a temporary entity whose kind is next, else the coords
+// written so far (start, end, then height: seven before the model short and the count byte).
+new g_BubbleWrites = -2
+new Float:g_BubbleFrom[3]
+new Float:g_BubbleTo[3]
+new g_BubbleCount
+new g_Bubbles
+new Float:g_BubbleDist
+
+public on_bubble_begin(dest, type)
+{
+	g_BubbleWrites = (g_BubbleWatch && type == SVC_TEMPENTITY) ? -1 : -2
+	return FMRES_IGNORED
+}
+
+public on_bubble_byte(value)
+{
+	if (g_BubbleWrites == -1)
+		g_BubbleWrites = (value == TE_BUBBLETRAIL) ? 0 : -2
+	else if (g_BubbleWrites == 7)
+	{
+		if (g_Bubbles++ == 0)
+		{
+			g_BubbleCount = value
+			g_BubbleDist = get_distance_f(g_BubbleFrom, g_BubbleTo)
+		}
+		g_BubbleWrites = -2
+	}
+	return FMRES_IGNORED
+}
+
+public on_bubble_coord(Float:value)
+{
+	if (g_BubbleWrites >= 0 && g_BubbleWrites < 7)
+	{
+		if (g_BubbleWrites < 3)
+			g_BubbleFrom[g_BubbleWrites] = value
+		else if (g_BubbleWrites < 6)
+			g_BubbleTo[g_BubbleWrites - 3] = value
+		g_BubbleWrites++
+	}
+	return FMRES_IGNORED
+}
+
+public test_bubble_trail_count_is_truncated()
+{
+	bench_set_timeout(90.0)
+	set_localinfo(BUBBLE_KEY, g_Map)
+	bench_change_map("ts_casa", "bubble_map")
+}
+
+public bubble_map()
+{
+	g_P[0] = bench_puppet("bubbler")
+	ASSERT(g_P[0] > 0)
+	set_cvar_num("realbullet", 0)
+	bench_puppet_spawn(g_P[0], "bubble_spawned", 20.0, "respawn")
+}
+
+public bubble_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	// past the spawn protection, with the gun out
+	bench_next("bubble_fire", 1.5, id)
+}
+
+public bubble_fire(id)
+{
+	engfunc(EngFunc_SetOrigin, id, Float:{2150.0, 776.0, 181.0})
+	set_pev(id, pev_velocity, Float:{0.0, 0.0, 0.0})
+	bench_next("bubble_aim", 0.3, id)
+}
+
+public bubble_aim(id)
+{
+	new Float:ofs[3], Float:eye[3], Float:aim[3]
+	pev(id, pev_origin, eye)
+	pev(id, pev_view_ofs, ofs)
+	eye[2] += ofs[2]
+	ASSERT(engfunc(EngFunc_PointContents, eye) != CONTENTS_WATER)
+	// the floor point 240 units from his eyes, straight ahead along x
+	aim[1] = eye[1]
+	aim[2] = 32.0
+	aim[0] = eye[0] + floatsqroot(240.0 * 240.0 - (eye[2] - aim[2]) * (eye[2] - aim[2]))
+	// under water by more than the 8 units the trail needs
+	new Float:above[3]
+	above = aim
+	above[2] += 9.0
+	ASSERT_EQ(engfunc(EngFunc_PointContents, above), CONTENTS_WATER)
+	bench_puppet_look_at(id, aim)
+	g_Bubbles = 0
+	g_BubbleWrites = -2
+	g_BubbleWatch = 1
+	Hold(id, IN_ATTACK, "bubble_fired")
+}
+
+public bubble_fired(id)
+{
+	bench_next("bubble_counted", 0.5, id)
+}
+
+public bubble_counted(id)
+{
+	g_BubbleWatch = 0
+	server_print("ts_gamerules: %d bubble trails, the first %d bubbles over %.1f units", g_Bubbles,
+		g_BubbleCount, g_BubbleDist)
+	ASSERT(g_Bubbles > 0)
+	// the Glock's spread moves the hit a few units: still between 3.5 and 4 x 64
+	ASSERT(g_BubbleDist > 228.0 && g_BubbleDist < 252.0)
+	ASSERT_EQ(g_BubbleCount, 3)
+	new home[32]
+	get_localinfo(BUBBLE_KEY, home, charsmax(home))
+	bench_change_map(home, "bubble_home")
+}
+
+public bubble_home()
+{
+	new home[32]
+	get_localinfo(BUBBLE_KEY, home, charsmax(home))
+	set_localinfo(BUBBLE_KEY, "")
+	ASSERT_STR_EQ(g_Map, home)
 	bench_pass()
 }

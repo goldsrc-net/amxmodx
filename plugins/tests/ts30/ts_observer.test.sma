@@ -15,14 +15,14 @@
 // old target again, and a team change does not reset the controls' clock. A player leaving spectate
 // is announced (Spectator idx 0) only if he was watching (iuser1 or iuser2 set), and the "respawn"
 // command takes only a player in a spectator mode (iuser1 set). Spectating does not hide the HUD,
-// nor any part of it. Leaving spectate keeps iuser3.
-// ../ts_observer.test.sma is the same on reTS, where it also tests that a joiner in last man
-// standing is told the round clock: that test does not run here (NO_FFA_LMS), as each free-for-all
-// last man standing round start on TS 3.0 corrupts the server's heap (see LMS_TEST below).
+// nor any part of it. Leaving spectate keeps iuser3. A joiner in last man standing is told the
+// round clock.
+// ../ts_observer.test.sma is the same on reTS.
 //
-// These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
+// These need the stock stack (HLDS, TS 3.0 i386) patched with amxxbench's tests/patch-ts30.py: on
+// an unpatched TS 3.0 each free-for-all last man standing round start corrupts the server's heap.
+// run.sh --tests plugins/tests/ts30 stock
 //
-#define NO_FFA_LMS
 
 #include <amxmodx>
 #include <fakemeta>
@@ -31,18 +31,6 @@
 #define OBS_CHASE_LOCKED	1
 #define OBS_CHASE_FREE	2
 #define OBS_ROAMING	3
-
-// A test that plays a free-for-all last man standing round. On The Specialists 3.0 each such round's
-// start corrupts the server's heap: RestartRound hands the rules object, in deathmatch a 12-byte
-// CHalfLifeMultiplay, to CHalfLifeTeamplay::RecountTeams, which reads a team list past its end and
-// writes 0 to the word 532 bytes on (ts_i386.so @0x67d40, RecountTeams @0xd6177 in ts_i686.so). The
-// ts30 copy defines NO_FFA_LMS so these are not tests there (HLDS once died of it, at a later map
-// change, in AMX Mod X's language manager).
-#if defined NO_FFA_LMS
-#define LMS_TEST(%1) public unrun_%1()
-#else
-#define LMS_TEST(%1) public test_%1()
-#endif
 
 new g_Map[32]
 new g_Helper
@@ -162,7 +150,7 @@ public bench_teardown()
 	}
 }
 
-LMS_TEST(lms_joiner_gets_the_round_clock)
+public test_lms_joiner_gets_the_round_clock()
 {
 	bench_set_timeout(120.0)
 	g_Lms = 1

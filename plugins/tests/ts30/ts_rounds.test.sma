@@ -8,14 +8,20 @@
 //     https://alliedmods.net/amxmodx-license
 
 //
-// Tests for the original The Specialists 3.0's rounds: in plain teamplay a wiped team does not end
-// a round. ../ts_rounds.test.sma is the same on reTS, where it also tests last man standing: those
-// tests do not run here (NO_FFA_LMS), as each free-for-all last man standing round start on TS 3.0
-// corrupts the server's heap (see LMS_TEST below).
+// Tests for the original The Specialists 3.0's rounds: in last man standing the first round starts
+// on an empty server, a joiner's round clock comes before the spectator catch-up and is truncated
+// (and comes three times), the last player alive ends the round, a spectator still in the round
+// watches nobody (teammates only, and last man standing has none), a new round sends everyone to
+// spectate with the value of his loadout as cash, a player who leaves counts as one gone, a later
+// death moves the count back, and the restartround command restarts the round under a black
+// banner. In plain teamplay a wiped team does not end a round. A ts_mapglobals with spawnflag 32
+// turns the round clock off.
+// ../ts_rounds.test.sma is the same on reTS.
 //
-// These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
+// These need the stock stack (HLDS, TS 3.0 i386) patched with amxxbench's tests/patch-ts30.py: on
+// an unpatched TS 3.0 each free-for-all last man standing round start corrupts the server's heap.
+// run.sh --tests plugins/tests/ts30 stock
 //
-#define NO_FFA_LMS
 
 #include <amxmodx>
 #include <fakemeta>
@@ -26,18 +32,6 @@
 #define GLOCK18		1
 
 #define OBS_ROAMING	3
-
-// A test that plays a free-for-all last man standing round. On The Specialists 3.0 each such round's
-// start corrupts the server's heap: RestartRound hands the rules object, in deathmatch a 12-byte
-// CHalfLifeMultiplay, to CHalfLifeTeamplay::RecountTeams, which reads a team list past its end and
-// writes 0 to the word 532 bytes on (ts_i386.so @0x67d40, RecountTeams @0xd6177 in ts_i686.so). The
-// ts30 copy defines NO_FFA_LMS so these are not tests there (HLDS once died of it, at a later map
-// change, in AMX Mod X's language manager).
-#if defined NO_FFA_LMS
-#define LMS_TEST(%1) public unrun_%1()
-#else
-#define LMS_TEST(%1) public test_%1()
-#endif
 
 new g_Map[32]
 new g_A
@@ -179,7 +173,7 @@ public bench_teardown()
 
 // The first round starts five seconds into the map whether or not anyone is playing, so a joiner
 // later on is told the time left (InitHUD), not a fresh round.
-LMS_TEST(lms_round_starts_on_an_empty_server)
+public test_lms_round_starts_on_an_empty_server()
 {
 	StartLms("empty_map")
 }
@@ -220,7 +214,7 @@ public empty_restored(clock)
 // InitHUD sends a joiner the round clock before the spectator catch-up, and the seconds left are
 // truncated. Five joiners 0.37 s apart: at least one joins in the second half of a second, where
 // truncating and rounding differ.
-LMS_TEST(lms_joiner_clock_truncated_and_first)
+public test_lms_joiner_clock_truncated_and_first()
 {
 	StartLms("clock_map")
 }
@@ -280,7 +274,7 @@ public clock_restored(result)
 // The last player alive is the Last Man Standing: +10 frags, a RoundTime with flag 2 to everyone,
 // and a new round three seconds later. A spectator who joins meanwhile watches nobody: in last man
 // standing a spectator still in the round may only watch teammates.
-LMS_TEST(last_man_standing_ends_the_round)
+public test_last_man_standing_ends_the_round()
 {
 	StartLms("last_map")
 }
@@ -504,7 +498,7 @@ public three_restored(result)
 
 // A player who leaves while the round runs counts like one who died: a second later the others
 // are told how many are still standing.
-LMS_TEST(leaver_is_counted_out)
+public test_leaver_is_counted_out()
 {
 	Lms3(0)
 }
@@ -530,7 +524,7 @@ public leaver_counted()
 
 // Each death puts the count a second after it, so two deaths 0.6 s apart are counted once, a
 // second after the later one, which leaves the last man standing.
-LMS_TEST(later_death_moves_the_count)
+public test_later_death_moves_the_count()
 {
 	Lms3(1)
 }
@@ -577,7 +571,7 @@ public later_counted()
 
 // A new round sends every player in play to spectate, where he waits for the respawn gate as
 // after a death, and pays him what his loadout is worth (the Glock's price, here).
-LMS_TEST(new_round_sends_everyone_to_spectate)
+public test_new_round_sends_everyone_to_spectate()
 {
 	StartLms("round_map")
 }
@@ -653,7 +647,7 @@ public round_restored(result)
 
 // restartround (a server command) restarts a round of last man standing a second later: everyone
 // is told "Restarting Round", in black, and a new round starts.
-LMS_TEST(restartround_restarts_the_round)
+public test_restartround_restarts_the_round()
 {
 	StartLms("restart_map")
 }
@@ -704,7 +698,7 @@ public restart_restored(result)
 }
 
 // The same restart, for the banner's colour.
-LMS_TEST(restart_banner_is_black)
+public test_restart_banner_is_black()
 {
 	StartLms("restart_map", 1)
 }
@@ -720,7 +714,7 @@ public banner_restored(result)
 // InitHUD tells a joiner the round clock, and so does each pass of UpdateClientData's HUD reset:
 // that one in the same frame, and again on the pass his move to spectate asks for, which comes
 // 0.1 s later as UpdateClientData runs at most every 0.1 s.
-LMS_TEST(joiner_is_told_the_clock_three_times)
+public test_joiner_is_told_the_clock_three_times()
 {
 	StartLms("thrice_map")
 }
@@ -767,7 +761,7 @@ public thrice_restored(result)
 
 // A ts_mapglobals with spawnflag 32 turns the round clock off: in last man standing nobody is told
 // the round's start (RoundTime to everyone) and a joiner is not caught up on it.
-LMS_TEST(mapglobals_turns_the_round_clock_off)
+public test_mapglobals_turns_the_round_clock_off()
 {
 	StartLms("clockoff_map")
 }

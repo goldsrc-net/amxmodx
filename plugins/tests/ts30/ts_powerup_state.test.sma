@@ -23,14 +23,26 @@
 
 new bool:g_Had[2048]
 new Float:g_Corpse[3]
+// The superjump test's player, and his gravity after his last PreThink (-1 until one has run).
+new g_Floater
+new Float:g_PreGravity
 
 public plugin_init()
 {
 	register_plugin("TS Powerup State Tests", AMXX_VERSION_STR, "AMXX Dev Team")
+	register_forward(FM_PlayerPreThink, "on_prethink", 1)
+}
+
+public on_prethink(id)
+{
+	if (id == g_Floater && g_Floater)
+		pev(id, pev_gravity, g_PreGravity)
+	return FMRES_IGNORED
 }
 
 public bench_teardown()
 {
+	g_Floater = 0
 	// The powerups the dead left behind.
 	new ent = -1
 	while ((ent = engfunc(EngFunc_FindEntityByString, ent, "classname", "ts_powerup")))
@@ -174,7 +186,10 @@ public watcher_after(id)
 	bench_pass()
 }
 
-// A running superjump powerup, which only a plugin can start, gives low gravity until it ends.
+// A running superjump powerup, which only a plugin can start, gives low gravity until it ends. The
+// powerup sets it in each PreThink (UpdatePowerUpState), so it is read there: on TS 3.0 PostThink
+// puts a player on the ground back to 1.0 every frame (@0x8186f), so a read between frames gave
+// 0.15 only while he was still falling from his spawn spot.
 public test_superjump_powerup_lowers_gravity()
 {
 	new id = bench_puppet("floater")
@@ -186,20 +201,21 @@ public floater_spawned(id)
 {
 	ts_set_fakeslowmo(id, 3.0)
 	ts_force_run_powerup(id, TSPWUP_SUPERJUMP)
+	g_PreGravity = -1.0
+	g_Floater = id
 	bench_next("floater_running", 0.5, id)
 }
 
 public floater_running(id)
 {
-	new Float:gravity
-	pev(id, pev_gravity, gravity)
-	ASSERT_NEAR(gravity, 0.15)
+	ASSERT_NEAR(g_PreGravity, 0.15)
 	bench_next("floater_over", 3.0, id)
 }
 
 public floater_over(id)
 {
 	ASSERT_EQ(ts_is_running_powerup(id), 0)
+	ASSERT_NEAR(g_PreGravity, 1.0)
 	new Float:gravity
 	pev(id, pev_gravity, gravity)
 	ASSERT_NEAR(gravity, 1.0)
