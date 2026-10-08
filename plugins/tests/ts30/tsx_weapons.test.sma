@@ -56,6 +56,15 @@ new bool:g_Armed
 public plugin_init()
 {
 	register_plugin("TSX Weapon Tests", AMXX_VERSION_STR, "AMXX Dev Team")
+	// A plugin that hooks TSHealth makes AMX Mod X block the message and send it again. TSX reads hits
+	// and kills from it, and the game asks the engine things while TSX handles it, so every kill here
+	// also checks that such a hook hides none from TSX.
+	register_message(get_user_msgid("TSHealth"), "pass_tshealth")
+}
+
+public pass_tshealth(msgid, dest, id)
+{
+	return PLUGIN_CONTINUE
 }
 
 public bench_setup()
