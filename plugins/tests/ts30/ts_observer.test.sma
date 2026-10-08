@@ -12,7 +12,9 @@
 // 2) and keeps that mode after dying, a joiner in last man standing is told the round clock, and a
 // spectator's pose (TSState) is not refreshed. The observer controls: jump cycles the mode, forward
 // watches the next player, a dead target is replaced, and with nobody to watch the spectator roams
-// without a message. ../ts_observer.test.sma is the same on reTS.
+// without a message. The spectate block clears the impulse, a spectator back from play watches his
+// old target again, and a team change does not reset the controls' clock.
+// ../ts_observer.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -38,6 +40,7 @@ public plugin_init()
 {
 	register_plugin("TS Observer Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	get_mapname(g_Map, charsmax(g_Map))
+	register_forward(FM_PlayerPostThink, "on_post_think")
 }
 
 public bool:is_dead(id)
@@ -359,5 +362,170 @@ public loner_later(id)
 	ASSERT_EQ(pev(id, pev_iuser2), 0)
 	ASSERT(speed == 420.0)
 	ASSERT_EQ(bench_msg_count(id, "", "#Spec_"), 0)
+	bench_pass()
+}
+
+// The spectate block clears the impulse a spectator sends, as it ends (after the observer controls).
+new g_Impulser
+new g_Impulses
+
+public on_post_think(id)
+{
+	if (id == g_Impulser && g_Impulser && pev(id, pev_impulse) != 0)
+		g_Impulses++
+	return FMRES_IGNORED
+}
+
+public test_spectator_impulse_is_cleared()
+{
+	new id = bench_puppet("impulser")
+	ASSERT(id > 0)
+	bench_wait_until("is_dead", "impulser_spectating", 2.0, id)
+}
+
+public impulser_spectating(id)
+{
+	ASSERT(spectating(id))
+	g_Impulses = 0
+	g_Impulser = id
+	bench_puppet_input(id, 0, 0.0, 0.0, 0.0, 55)
+	bench_next("impulser_later", 0.3, id)
+}
+
+public impulser_later(id)
+{
+	bench_puppet_input(id, 0)
+	g_Impulser = 0
+	// whoever gets the slot next starts without it
+	set_pev(id, pev_impulse, 0)
+	server_print("ts_observer: impulse left after the think %d times", g_Impulses)
+	ASSERT_EQ(g_Impulses, 0)
+	bench_pass()
+}
+
+// A spectator who goes into play keeps the player he watched: back in spectate he watches him again
+// (here the second of two, where looking afresh would find the first).
+public test_returning_spectator_watches_his_old_target()
+{
+	StartTwoAndASpectator("return_spectating")
+}
+
+public return_spectating(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_FREE)
+	ASSERT(g_Helper < g_Helper2)
+	if (pev(id, pev_iuser2) == g_Helper2)
+	{
+		return_target(id)
+		return
+	}
+	bench_puppet_press(id, IN_FORWARD, "return_target")
+}
+
+public return_target(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser2), g_Helper2)
+	bench_puppet_spawn(id, "return_playing", 20.0, "respawn")
+}
+
+public return_playing(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), 0)
+	user_kill(id)
+	bench_wait_until("spectating", "return_back", 10.0, id)
+}
+
+public return_back(id)
+{
+	server_print("ts_observer: back in mode %d watching %d (helpers %d, %d)", pev(id, pev_iuser1),
+		pev(id, pev_iuser2), g_Helper, g_Helper2)
+	ASSERT(is_user_alive(g_Helper2))
+	ASSERT_EQ(pev(id, pev_iuser2), g_Helper2)
+	bench_pass()
+}
+
+// Going to spectate again (a team change, in teamplay) does not reset the controls' 0.2 s clock:
+// jump pressed again at once does nothing. (The server is put in teamplay for the test if it is
+// not; the flag travels as the step's data, plugin variables start over on the map change.)
+new g_TeamChanged
+new g_OldTeam[32]
+
+public test_team_change_keeps_the_jump_clock()
+{
+	bench_set_timeout(120.0)
+	if (get_cvar_num("mp_teamplay"))
+	{
+		clock_team_map(0)
+		return
+	}
+	set_cvar_num("mp_teamplay", 1)
+	bench_change_map(g_Map, "clock_team_map", 1)
+}
+
+public clock_team_map(changed)
+{
+	g_TeamChanged = changed
+	g_Helper = bench_puppet("clockhelper")
+	ASSERT(g_Helper > 0)
+	bench_puppet_spawn(g_Helper, "clock_helper_alive", 20.0, "respawn")
+}
+
+public clock_helper_alive(helper)
+{
+	new id = bench_puppet("clockspec")
+	ASSERT(id > 0)
+	bench_wait_until("is_dead", "clock_spectating", 2.0, id)
+}
+
+public clock_spectating(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_FREE)
+	bench_puppet_press(id, IN_JUMP, "clock_jumped")
+}
+
+public clock_jumped(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_LOCKED)
+	// another team: the first, or the second if he is on the first (jointeam counts from 1)
+	get_user_team(id, g_OldTeam, charsmax(g_OldTeam))
+	bench_puppet_cmd(id, "jointeam 1")
+	bench_next("clock_joined", 0.0, id)
+}
+
+public clock_joined(id)
+{
+	new team[32]
+	get_user_team(id, team, charsmax(team))
+	if (equal(team, g_OldTeam))
+		bench_puppet_cmd(id, "jointeam 2")
+	bench_next("clock_moved", 0.0, id)
+}
+
+public clock_moved(id)
+{
+	new team[32]
+	get_user_team(id, team, charsmax(team))
+	server_print("ts_observer: now team %s, mode %d", team, pev(id, pev_iuser1))
+	// StartObserver put him back in chase
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_FREE)
+	bench_puppet_press(id, IN_JUMP, "clock_jumped_again")
+}
+
+public clock_jumped_again(id)
+{
+	new mode = pev(id, pev_iuser1)
+	if (!g_TeamChanged)
+	{
+		clock_restored(mode)
+		return
+	}
+	set_cvar_num("mp_teamplay", 0)
+	bench_change_map(g_Map, "clock_restored", mode)
+}
+
+public clock_restored(mode)
+{
+	server_print("ts_observer: mode after the second jump %d", mode)
+	ASSERT_EQ(mode, OBS_CHASE_FREE)
 	bench_pass()
 }

@@ -9,23 +9,37 @@
 
 //
 // Tests for the original The Specialists 3.0's rounds: in last man standing the first round starts
-// on an empty server, a joiner's round clock comes before the spectator catch-up and is truncated,
-// the last player alive ends the round, and a spectator still in the round watches nobody
-// (teammates only, and last man standing has none). In plain teamplay a wiped team does not end a
-// round. ../ts_rounds.test.sma is the same on reTS.
+// on an empty server, a joiner's round clock comes before the spectator catch-up and is truncated
+// (and comes three times), the last player alive ends the round, a spectator still in the round
+// watches nobody (teammates only, and last man standing has none), a new round sends everyone to
+// spectate with the value of his loadout as cash, a player who leaves counts as one gone, a later
+// death moves the count back, and the restartround command restarts the round under a black
+// banner. In plain teamplay a wiped team does not end a round. ../ts_rounds.test.sma is the same
+// on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
 
 #include <amxmodx>
 #include <fakemeta>
+#include <tsfun>
 #include <amxxbench>
+
+// The Specialists 3.0 weapon ids.
+#define GLOCK18		1
 
 #define OBS_ROAMING	3
 
 new g_Map[32]
 new g_A
 new g_B
+new g_C
+new g_Cash
+new Float:g_Death
+// Every RoundTime sent to one watched joiner on his own (MSG_ONE) with flag 0, and when.
+new g_Watched
+new g_ClockCount
+new Float:g_ClockTimes[8]
 new g_Saved
 new g_RoundTime
 new g_Teamplay
@@ -68,6 +82,8 @@ public on_round_time(msgid, dest, ent)
 		g_RoundStart = get_gametime()
 		return PLUGIN_CONTINUE
 	}
+	if (ent == g_Watched && g_ClockCount < sizeof(g_ClockTimes))
+		g_ClockTimes[g_ClockCount++] = get_gametime()
 	for (new i = 0; i < g_Joined; i++)
 		if (g_Joiner[i] == ent && g_JoinTime[i] == 0.0)
 		{
@@ -121,14 +137,14 @@ WaitFor(const condition[], const step[], Float:seconds)
 }
 
 // Last man standing for one map (lastmanstanding 1, roundtime 180), then the server's own settings.
-StartLms(const step[])
+StartLms(const step[], data = 0)
 {
 	bench_set_timeout(150.0)
 	g_Saved = 1
 	g_RoundTime = get_cvar_num("roundtime")
 	set_cvar_num("lastmanstanding", 1)
 	set_cvar_num("roundtime", 180)
-	bench_change_map(g_Map, step)
+	bench_change_map(g_Map, step, data)
 }
 
 // Puts the map back first, so a failure leaves the next tests on the usual rules. Plugins reload on
@@ -348,17 +364,21 @@ public test_teamplay_wipe_is_not_a_round()
 	bench_set_timeout(150.0)
 	if (get_cvar_num("mp_teamplay"))
 	{
-		team_map()
+		team_map(0)
 		return
 	}
 	g_Saved = 1
 	g_Teamplay = 1
 	set_cvar_num("mp_teamplay", 1)
-	bench_change_map(g_Map, "team_map")
+	bench_change_map(g_Map, "team_map", 1)
 }
 
-public team_map()
+// changed: the test put the server in teamplay (plugin variables start over on the map change, so
+// it travels as the step's data)
+public team_map(changed)
 {
+	g_Teamplay = changed
+	g_Saved = changed
 	g_A = bench_puppet("teamone")
 	ASSERT(g_A > 0)
 	bench_puppet_spawn(g_A, "team_a_alive", 20.0, "respawn")
@@ -413,5 +433,321 @@ public team_restored(result)
 	server_print("ts_rounds: teamplay wipe result %d", result)
 	ASSERT(result & 1)
 	ASSERT(result & 2)
+	bench_pass()
+}
+
+// Three players in play in last man standing, then leaver_ready (kind 0) or later_ready (1).
+// (Plugin variables start over on the map change; the kind travels as the step's data.)
+new g_Kind3
+Lms3(kind)
+{
+	StartLms("three_map", kind)
+}
+
+public three_map(kind)
+{
+	g_Kind3 = kind
+	g_A = bench_puppet("lmsa")
+	g_B = bench_puppet("lmsb")
+	g_C = bench_puppet("lmsc")
+	ASSERT(g_A > 0 && g_B > 0 && g_C > 0)
+	WaitFor("round_started", "three_round", 15.0)
+}
+
+public three_round()
+{
+	g_Deadline = get_gametime() + 20.0
+	bench_wait_until("joined", "three_a", 25.0, g_A)
+}
+
+public three_a()
+{
+	g_Deadline = get_gametime() + 20.0
+	bench_wait_until("joined", "three_b", 25.0, g_B)
+}
+
+public three_b()
+{
+	g_Deadline = get_gametime() + 20.0
+	bench_wait_until("joined", "three_c", 25.0, g_C)
+}
+
+public three_c()
+{
+	if (!is_user_alive(g_A) || !is_user_alive(g_B) || !is_user_alive(g_C))
+	{
+		// bit 4: the three could not get into play
+		EndLms("three_restored", 16)
+		return
+	}
+	// past the spawn protection
+	bench_next(g_Kind3 ? "later_ready" : "leaver_ready", 1.5)
+}
+
+public three_restored(result)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	server_print("ts_rounds: three-player result %d", result)
+	ASSERT_FALSE(result & 16)
+	ASSERT(result & 1)
+	bench_pass()
+}
+
+// A player who leaves while the round runs counts like one who died: a second later the others
+// are told how many are still standing.
+public test_leaver_is_counted_out()
+{
+	Lms3(0)
+}
+
+public leaver_ready()
+{
+	g_Mark = bench_msg_last(g_A)
+	server_cmd("kick #%d", get_user_userid(g_C))
+	WaitFor("standing_told", "leaver_counted", 3.0)
+}
+
+public bool:standing_told()
+{
+	return bench_msg_next(g_A, g_Mark, "TSMessage", "men standing") != BenchMsg:0
+		|| get_gametime() > g_Deadline
+}
+
+public leaver_counted()
+{
+	// bit 0: "2 men standing!"
+	EndLms("three_restored", bench_msg_next(g_A, g_Mark, "TSMessage", "2 men standing") != BenchMsg:0)
+}
+
+// Each death puts the count a second after it, so two deaths 0.6 s apart are counted once, a
+// second after the later one, which leaves the last man standing.
+public test_later_death_moves_the_count()
+{
+	Lms3(1)
+}
+
+public later_ready()
+{
+	g_Mark = bench_msg_last(g_A)
+	user_kill(g_C)
+	bench_next("later_second", 0.6)
+}
+
+public later_second()
+{
+	user_kill(g_B)
+	g_Deadline = get_gametime() + 4.0
+	bench_wait_until("b_dead", "later_b_dead", 5.0)
+}
+
+public bool:b_dead()
+{
+	return !is_user_alive(g_B) || get_gametime() > g_Deadline
+}
+
+public later_b_dead()
+{
+	g_Death = get_gametime()
+	WaitFor("last_man_after_mark", "later_counted", 3.0)
+}
+
+public bool:last_man_after_mark()
+{
+	return bench_msg_next(g_A, g_Mark, "TSMessage", "is the Last Man Standing") != BenchMsg:0
+		|| get_gametime() > g_Deadline
+}
+
+public later_counted()
+{
+	new told = bench_msg_next(g_A, g_Mark, "TSMessage", "is the Last Man Standing") != BenchMsg:0
+	new Float:after = get_gametime() - g_Death
+	server_print("ts_rounds: last man told %d, %.2f s after the second death", told, after)
+	// bit 0: told, a second after the second death
+	EndLms("three_restored", told && after >= 0.9 && after < 1.3)
+}
+
+// A new round sends every player in play to spectate, where he waits for the respawn gate as
+// after a death, and pays him what his loadout is worth (the Glock's price, here).
+public test_new_round_sends_everyone_to_spectate()
+{
+	StartLms("round_map")
+}
+
+public round_map()
+{
+	g_A = bench_puppet("roundone")
+	g_B = bench_puppet("roundtwo")
+	ASSERT(g_A > 0 && g_B > 0)
+	WaitFor("round_started", "round_round", 15.0)
+}
+
+public round_round()
+{
+	g_Deadline = get_gametime() + 20.0
+	bench_wait_until("joined", "round_a", 25.0, g_A)
+}
+
+public round_a()
+{
+	g_Deadline = get_gametime() + 20.0
+	bench_wait_until("joined", "round_b", 25.0, g_B)
+}
+
+public round_b()
+{
+	if (!is_user_alive(g_A) || !is_user_alive(g_B))
+	{
+		EndLms("round_restored", 16)
+		return
+	}
+	ts_giveweapon(g_A, GLOCK18, 0, 0)
+	bench_next("round_armed", 1.0)
+}
+
+public round_armed()
+{
+	g_Cash = ts_getusercash(g_A)
+	g_RoundStart = 0.0
+	user_kill(g_B)
+	WaitFor("round_started", "round_new", 10.0)
+}
+
+public round_new()
+{
+	bench_next("round_after", 0.2)
+}
+
+public round_after()
+{
+	new cash = ts_getusercash(g_A)
+	server_print("ts_rounds: new round %d, survivor alive %d mode %d, cash %d -> %d", g_RoundStart > 0.0,
+		is_user_alive(g_A), pev(g_A, pev_iuser1), g_Cash, cash)
+	// bit 0: a new round came; bit 1: the survivor spectates; bit 2: he was paid
+	new result = g_RoundStart > 0.0 ? 1 : 0
+	if (!is_user_alive(g_A) && pev(g_A, pev_iuser1) != 0)
+		result |= 2
+	if (cash > g_Cash)
+		result |= 4
+	EndLms("round_restored", result)
+}
+
+public round_restored(result)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	server_print("ts_rounds: new round result %d", result)
+	ASSERT_FALSE(result & 16)
+	ASSERT(result & 1)
+	ASSERT(result & 2)
+	ASSERT(result & 4)
+	bench_pass()
+}
+
+// restartround (a server command) restarts a round of last man standing a second later: everyone
+// is told "Restarting Round", in black, and a new round starts.
+public test_restartround_restarts_the_round()
+{
+	StartLms("restart_map")
+}
+
+// kind 0: the restart; 1: the banner's colour
+new g_Kind
+public restart_map(kind)
+{
+	g_Kind = kind
+	g_A = bench_puppet("restarter")
+	ASSERT(g_A > 0)
+	WaitFor("round_started", "restart_round", 15.0)
+}
+
+public restart_round()
+{
+	g_Mark = bench_msg_last(g_A)
+	g_RoundStart = 0.0
+	server_cmd("restartround")
+	WaitFor("round_started", "restart_new", 4.0)
+}
+
+public restart_new()
+{
+	// bit 0: the banner; bit 1: a new round; bit 2: the banner is black
+	new result = 0
+	new BenchMsg:msg = bench_msg_next(g_A, g_Mark, "TSMessage", "Restarting Round")
+	if (msg != BenchMsg:0)
+	{
+		result |= 1
+		server_print("ts_rounds: Restarting Round in %d %d %d", bench_msg_int(msg, 0),
+			bench_msg_int(msg, 1), bench_msg_int(msg, 2))
+		if (bench_msg_int(msg, 0) == 0 && bench_msg_int(msg, 1) == 0 && bench_msg_int(msg, 2) == 0)
+			result |= 4
+	}
+	if (g_RoundStart > 0.0)
+		result |= 2
+	EndLms(g_Kind ? "banner_restored" : "restart_restored", result)
+}
+
+public restart_restored(result)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	server_print("ts_rounds: restartround result %d", result)
+	ASSERT(result & 1)
+	ASSERT(result & 2)
+	bench_pass()
+}
+
+// The same restart, for the banner's colour.
+public test_restart_banner_is_black()
+{
+	StartLms("restart_map", 1)
+}
+
+public banner_restored(result)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	ASSERT(result & 1)
+	ASSERT(result & 4)
+	bench_pass()
+}
+
+// InitHUD tells a joiner the round clock, and so does each pass of UpdateClientData's HUD reset:
+// that one in the same frame, and again on the pass his move to spectate asks for.
+public test_joiner_is_told_the_clock_three_times()
+{
+	StartLms("thrice_map")
+}
+
+public thrice_map()
+{
+	g_A = bench_puppet("thricefirst")
+	ASSERT(g_A > 0)
+	WaitFor("round_started", "thrice_join", 15.0)
+}
+
+public thrice_join()
+{
+	g_ClockCount = 0
+	g_Watched = bench_puppet("thricejoiner")
+	ASSERT(g_Watched > 0)
+	bench_next("thrice_joined", 1.0)
+}
+
+public thrice_joined()
+{
+	for (new i = 0; i < g_ClockCount; i++)
+		server_print("ts_rounds: joiner clock %d at %.3f", i, g_ClockTimes[i])
+	// count, and bit 8 when the first two came in one frame (the third comes on the next
+	// UpdateClientData, which TS 3.0 runs 0.1 s later and reTS in the same frame)
+	new result = g_ClockCount
+	if (g_ClockCount >= 3 && g_ClockTimes[0] == g_ClockTimes[1] && g_ClockTimes[2] >= g_ClockTimes[1])
+		result |= 256
+	g_Watched = 0
+	EndLms("thrice_restored", result)
+}
+
+public thrice_restored(result)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	server_print("ts_rounds: joiner clock result %d", result)
+	ASSERT_EQ(result & 255, 3)
+	ASSERT(result & 256)
 	bench_pass()
 }
