@@ -12,14 +12,16 @@
 // damagemult scales bullets only, and only on a map started with sv_cheats 1; dmgreport (above 1,
 // same cheat gate, and only where something registers the cvar) tells everyone in chat each
 // bullet's damage, the flying bullets of slow motion included, and each thrown blade's; a thrown
-// knife's hit reaches client_damage as its thrower's.
-// ../ts_damage.test.sma is the same on reTS.
+// knife's hit reaches client_damage as its thrower's. TSHealth carries the health truncated, and
+// no Health or Battery message goes out; a death turns the dead player's items off for everyone
+// (ActItems) and sends him no CurWeapon. ../ts_damage.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
 
 #include <amxmodx>
 #include <fakemeta>
+#include <hamsandwich>
 #include <xs>
 #include <tsx>
 #include <tsfun>
@@ -445,5 +447,99 @@ public hit_check(id)
 {
 	ASSERT_EQ(g_HitAttacker, g_P[0])
 	ASSERT_EQ(g_HitWeapon, TSW_TKNIFE)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// TSHealth carries the health truncated, not rounded (CBasePlayer::UpdateClientData, 0x81fa2), and
+// while the health has a fraction it goes out again at each update, since the game compares the
+// health with the whole number it last sent. The game never sends the stock Health or Battery
+// messages.
+
+new g_TSHealths
+
+public test_tshealth_is_the_health_truncated()
+{
+	g_P[0] = bench_puppet("healthy")
+	ASSERT(g_P[0] > 0)
+	bench_puppet_spawn(g_P[0], "tshealth_spawned", 20.0, "respawn")
+}
+
+public tshealth_spawned(id)
+{
+	bench_next("tshealth_set", 0.5, id)
+}
+
+public tshealth_set(id)
+{
+	set_pev(id, pev_health, 57.75)
+	set_pev(id, pev_armorvalue, 20.0)
+	g_TSHealths = bench_msg_count(id, "TSHealth")
+	bench_next("tshealth_sent", 0.5, id)
+}
+
+public tshealth_sent(id)
+{
+	new BenchMsg:msg = bench_msg_last(id, "TSHealth")
+	ASSERT(msg != BenchMsg:0)
+	ASSERT_EQ(bench_msg_int(msg, 0), 57)
+	ASSERT(bench_msg_count(id, "TSHealth") - g_TSHealths >= 2)
+	ASSERT_EQ(bench_msg_count(id, "Health"), 0)
+	ASSERT_EQ(bench_msg_count(id, "Battery"), 0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// When a player dies everyone is told to stop drawing his laser and flashlight (ActItems with his
+// index and 0, CBasePlayer::Killed 0x7f434). The game sends him no CurWeapon marking him dead, as
+// the stock SDK does.
+
+public test_death_turns_his_items_off_for_everyone()
+{
+	g_P[0] = bench_puppet("watcher")
+	g_P[1] = bench_puppet("dier")
+	ASSERT(g_P[0] > 0 && g_P[1] > 0)
+	bench_puppet_spawn(g_P[0], "death_watcher_up", 20.0, "respawn")
+}
+
+public death_watcher_up(id)
+{
+	bench_puppet_spawn(g_P[1], "death_dier_up", 20.0, "respawn")
+}
+
+public death_dier_up(id)
+{
+	bench_next("death_kill", 0.5, id)
+}
+
+public death_kill(id)
+{
+	set_pev(g_P[1], pev_health, 1.0)
+	ExecuteHamB(Ham_TakeDamage, g_P[1], g_P[0], g_P[0], 10.0, DMG_BULLET)
+	ASSERT_FALSE(is_user_alive(g_P[1]))
+	bench_next("death_told", 0.3, id)
+}
+
+public death_told(id)
+{
+	new watcher = g_P[0], dier = g_P[1]
+	// After the DeathMsg, everyone gets ActItems {dier, 0}.
+	new BenchMsg:death = bench_msg_last(watcher, "DeathMsg")
+	ASSERT(death != BenchMsg:0)
+	new bool:off = false
+	new BenchMsg:m = bench_msg_next(watcher, death, "ActItems")
+	for (; m != BenchMsg:0; m = bench_msg_next(watcher, m, "ActItems"))
+		if (bench_msg_int(m, 0) == dier && bench_msg_int(m, 1) == 0)
+			off = true
+	ASSERT(off)
+	// And the dier no CurWeapon with the dead marker (an id of -1).
+	death = bench_msg_last(dier, "DeathMsg")
+	ASSERT(death != BenchMsg:0)
+	m = bench_msg_next(dier, death, "CurWeapon")
+	for (; m != BenchMsg:0; m = bench_msg_next(dier, m, "CurWeapon"))
+	{
+		new weapon = bench_msg_int(m, 1)
+		ASSERT(weapon != -1 && weapon != 255)
+	}
 	bench_pass()
 }
