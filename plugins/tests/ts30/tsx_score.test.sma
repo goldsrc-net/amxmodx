@@ -67,6 +67,7 @@ public plugin_init()
 {
 	register_plugin("TSX Score Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	register_event("DeathMsg", "on_death_msg", "a")
+	RestoreGameCfg()
 }
 
 public bench_setup()
@@ -246,6 +247,66 @@ bool:CheckKill(n, points, flags)
 Float:Gap(n)
 {
 	return g_KillTime[n] - g_KillTime[n - 1]
+}
+
+// --- deathmatch ------------------------------------------------------------------------------
+// The kills here are scored as in deathmatch. In teamplay, with friendly fire off, a puppet cannot
+// hurt a teammate, and one who could would make a team kill. So on a teamplay server the first test
+// changes the map in deathmatch, with game.cfg put aside (as tsxs_game.cfg) for that change and back
+// once the new map is up, and the last test changes it back in teamplay.
+
+#define GAMECFG "game.cfg"
+#define GAMECFG_SAVED "tsxs_game.cfg"
+
+RestoreGameCfg()
+{
+	if (file_exists(GAMECFG_SAVED))
+	{
+		delete_file(GAMECFG)
+		rename_file(GAMECFG_SAVED, GAMECFG, 1)
+	}
+}
+
+// Copies game.cfg aside and writes it back without its mp_teamplay line.
+new g_CfgLines[32][128]
+
+SetGameCfgAside()
+{
+	new count = 0
+	new f = fopen(GAMECFG, "rt")
+	if (!f)
+		return
+	while (count < sizeof(g_CfgLines) && fgets(f, g_CfgLines[count], charsmax(g_CfgLines[])))
+		count++
+	fclose(f)
+	rename_file(GAMECFG, GAMECFG_SAVED, 1)
+	f = fopen(GAMECFG, "wt")
+	for (new i = 0; i < count; i++)
+		if (containi(g_CfgLines[i], "mp_teamplay") == -1)
+			fputs(f, g_CfgLines[i])
+	fclose(f)
+}
+
+public test_deathmatch_for_the_score_tests()
+{
+	if (!get_cvar_num("mp_teamplay"))
+	{
+		bench_pass()
+		return
+	}
+	set_localinfo("tsxs_teamplay", "1")
+	set_cvar_num("mp_teamplay", 0)
+	SetGameCfgAside()
+	new map[32]
+	get_mapname(map, charsmax(map))
+	bench_change_map(map, "deathmatch_up")
+}
+
+public deathmatch_up()
+{
+	RestoreGameCfg()
+	ASSERT_EQ(get_cvar_num("mp_teamplay"), 0)
+	bench_pass()
 }
 
 // --- double kills --------------------------------------------------------------------------
@@ -438,5 +499,28 @@ public respawn_settled(victim)
 {
 	ASSERT_EQ(get_pdata_byte(victim, PDATA_STREAK, 0, 0), 0)
 	ASSERT_EQ(ts_getkillingstreak(victim), 0)
+	bench_pass()
+}
+
+// The server's own mode again, after the last kill test.
+public test_back_to_the_servers_mode()
+{
+	new teamplay[4]
+	get_localinfo("tsxs_teamplay", teamplay, charsmax(teamplay))
+	if (!teamplay[0])
+	{
+		bench_pass()
+		return
+	}
+	set_localinfo("tsxs_teamplay", "")
+	set_cvar_num("mp_teamplay", 1)
+	new map[32]
+	get_mapname(map, charsmax(map))
+	bench_change_map(map, "servers_mode_up")
+}
+
+public servers_mode_up()
+{
+	ASSERT_EQ(get_cvar_num("mp_teamplay"), 1)
 	bench_pass()
 }

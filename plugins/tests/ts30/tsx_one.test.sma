@@ -458,6 +458,7 @@ public test_back_to_deathmatch()
 
 public deathmatch_again()
 {
-	ASSERT_STR_EQ(g_GameDesc, "The Specialists (DM)")
+	// The server's own mode: teamplay when its game.cfg says so.
+	ASSERT_STR_EQ(g_GameDesc, get_cvar_num("mp_teamplay") ? "The Specialists (Teamplay)" : "The Specialists (DM)")
 	bench_pass()
 }
