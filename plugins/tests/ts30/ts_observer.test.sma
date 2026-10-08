@@ -14,7 +14,8 @@
 // without a message. The spectate block clears the impulse, a spectator back from play watches his
 // old target again, and a team change does not reset the controls' clock. A player leaving spectate
 // is announced (Spectator idx 0) only if he was watching (iuser1 or iuser2 set), and the "respawn"
-// command takes only a player in a spectator mode (iuser1 set). Spectating does not hide the HUD.
+// command takes only a player in a spectator mode (iuser1 set). Spectating does not hide the HUD,
+// nor any part of it. Leaving spectate keeps iuser3.
 // ../ts_observer.test.sma is the same on reTS, where it also tests that a joiner in last man
 // standing is told the round clock: that test does not run here (NO_FFA_LMS), as each free-for-all
 // last man standing round start on TS 3.0 corrupts the server's heap (see LMS_TEST below).
@@ -629,7 +630,8 @@ public unannounced_done(id)
 
 // ---------------------------------------------------------------------------------------------
 // Spectating does not hide the HUD: a joiner, who spectates until he plays, is never sent a
-// HideWeapon hiding the health (8) or the weapons (1). Every HideWeapon he gets is printed.
+// HideWeapon hiding anything, the health (8), the weapons (1) or the flashlight (2) among them.
+// Every HideWeapon he gets is printed.
 
 new g_Hider
 new g_Hides
@@ -668,6 +670,43 @@ public hud_counted(id)
 	server_print("ts_observer: %d HideWeapon to the spectating joiner, bits %d", g_Hides, g_HideBits)
 	g_Hider = 0
 	ASSERT(pev(id, pev_iuser1) != 0)
-	ASSERT_EQ(g_HideBits & 9, 0)
+	ASSERT_EQ(g_HideBits, 0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Leaving spectate clears iuser1 and iuser2 only: an iuser3 set on a spectator (7 here, set before
+// each "respawn") is still there once he is in play.
+
+public test_leaving_spectate_keeps_iuser3()
+{
+	bench_set_timeout(60.0)
+	new id = bench_puppet("iuserthree")
+	ASSERT(id > 0)
+	bench_wait_until("spectating", "iuser3_spectating", 5.0, id)
+}
+
+public iuser3_spectating(id)
+{
+	g_Until = get_gametime() + 15.0
+	bench_wait_until("iuser3_back", "iuser3_in", 20.0, id)
+}
+
+public bool:iuser3_back(id)
+{
+	if (is_user_alive(id) || get_gametime() > g_Until)
+		return true
+	set_pev(id, pev_iuser3, 7)
+	engclient_cmd(id, "respawn")
+	return false
+}
+
+public iuser3_in(id)
+{
+	server_print("ts_observer: back in play: alive %d, iuser1 %d, iuser2 %d, iuser3 %d", is_user_alive(id),
+		pev(id, pev_iuser1), pev(id, pev_iuser2), pev(id, pev_iuser3))
+	ASSERT(is_user_alive(id))
+	ASSERT_EQ(pev(id, pev_iuser1), 0)
+	ASSERT_EQ(pev(id, pev_iuser3), 7)
 	bench_pass()
 }

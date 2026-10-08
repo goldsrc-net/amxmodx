@@ -18,11 +18,19 @@
 // silently. Kevlar takes 21.25% off a bullet to the body; a flying bullet makes no sound or mark
 // where it hits and goes on through a player; a team list's repeated name keeps its place; a
 // spectator votes, for the first word after "map", and "vote stats" lists the last count; a
-// ts_mapglobals thinks once.
+// ts_mapglobals thinks once. Kevlar leaves the head; the range falloff index is truncated; with
+// every bullet slot in flight the game warns; in The One mode the team list's first name gives way
+// to "The ONE"; a ts_mapglobals keeps its saved fields through Spawn; a bullet in flight ends with
+// the map.
 // ../ts_gamerules.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
+
+// ts_mapglobals's player_respawn_num (+0x64) and player_at_a_time_num (+0x68), as fakemeta pdata
+// offsets (4-byte units, no Linux difference), in ts_i386.so.
+#define MAPGLOBALS_RESPAWN_NUM	25
+#define MAPGLOBALS_AT_A_TIME_NUM	26
 
 #include <amxmodx>
 #include <fakemeta>
@@ -59,6 +67,7 @@ public plugin_init()
 	register_forward(FM_MessageBegin, "on_message_begin")
 	register_forward(FM_WriteByte, "on_write_byte")
 	register_forward(FM_TraceLine, "on_trace", 1)
+	register_forward(FM_TraceLine, "on_trace_falloff", 1)
 }
 
 public bench_setup()
@@ -1375,6 +1384,12 @@ public dup_respawned(id)
 RestoreTeamCvars()
 {
 	new v[256]
+	get_localinfo("tsgr_theone", v, charsmax(v))
+	if (v[0])
+	{
+		set_localinfo("tsgr_theone", "")
+		set_cvar_num("mp_theonemode", str_to_num(v))
+	}
 	get_localinfo("tsgr_teamplay", v, charsmax(v))
 	if (!v[0])
 		return
@@ -1467,5 +1482,590 @@ public mapglobals_later(ent)
 	server_print("ts_gamerules: ts_mapglobals next think %.1f", next)
 	engfunc(EngFunc_RemoveEntity, ent)
 	ASSERT(next == 0.0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Kevlar covers the body and arms only: after a real shot to the wearer's head (hit group 1) sets
+// the hit group the game remembers, 40 points of damage take the full 40 with kevlar too.
+
+new const Float:g_HeadHeights[] = {28.0, 26.0, 30.0, 24.0, 32.0, 22.0}
+new Float:g_LineDir[3]
+
+public test_kevlar_leaves_the_head()
+{
+	bench_set_timeout(60.0)
+	g_P[0] = bench_puppet("headshooter")
+	g_P[1] = bench_puppet("headwearer")
+	ASSERT(g_P[0] > 0 && g_P[1] > 0)
+	set_cvar_num("realbullet", 0)
+	bench_puppet_spawn(g_P[1], "head_wearer", 20.0, "respawn")
+}
+
+public head_wearer(id)
+{
+	bench_puppet_spawn(g_P[0], "head_shooter", 20.0, "respawn")
+}
+
+public head_shooter(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	bench_next("head_aim", 1.5)
+}
+
+public head_aim()
+{
+	ASSERT(is_user_alive(g_P[0]) && is_user_alive(g_P[1]))
+	ASSERT(PlaceForGroupShot(200.0, 1, 1, g_HeadHeights, sizeof(g_HeadHeights)))
+	set_pev(g_P[1], pev_health, 500.0)
+	g_ShotGroup = -1
+	g_FireTime = 0.0
+	g_Pressing = 0
+	g_Watch = 2
+	bench_wait_until("pierce_one_shot", "head_shot", 5.0, g_P[0])
+}
+
+public head_shot(id)
+{
+	bench_next("head_hits", 0.2)
+}
+
+public head_hits()
+{
+	g_Watch = 0
+	ASSERT(g_FireTime > 0.0)
+	server_print("ts_gamerules: the shot hit group %d", g_ShotGroup)
+	ASSERT_EQ(g_ShotGroup, 1)
+	new plain = DamageLoss(0)
+	new kevlar = DamageLoss(100)
+	server_print("ts_gamerules: 40 points after a head hit take %d, %d with kevlar", plain, kevlar)
+	ASSERT_EQ(plain, 40)
+	ASSERT_EQ(kevlar, 40)
+	bench_pass()
+}
+
+// Stands the target at a spawn spot (where he is first, then each deathmatch and team spot) and the
+// shooter range units away on the first of eight compass lines with room and a floor for him, facing
+// a point one of heights above the target's origin, when a line from his eyes to there meets the
+// target in a hit group from lo to hi. With far set, the line must also have such a place for him
+// from far to far + 20 units. Keeps the line's direction in g_LineDir. False if none.
+bool:PlaceForGroupShot(Float:range, lo, hi, const Float:heights[], count, Float:far = 0.0)
+{
+	new Float:center[3]
+	pev(g_P[1], pev_origin, center)
+	for (new h = 0; h < count; h++)
+		if (GroupShotAt(center, range, lo, hi, heights[h], far))
+			return true
+	for (new c = 0; c < sizeof(g_LineSpots); c++)
+	{
+		new spot = -1
+		while ((spot = engfunc(EngFunc_FindEntityByString, spot, "classname", g_LineSpots[c])) > 0)
+		{
+			pev(spot, pev_origin, center)
+			center[2] += 1.0
+			for (new h = 0; h < count; h++)
+				if (GroupShotAt(center, range, lo, hi, heights[h], far))
+					return true
+		}
+	}
+	return false
+}
+
+// The shooter at range from center along -dir (a unit vector), on the floor with room, aiming at
+// aim; true when his eyes see the target there in a hit group from lo to hi.
+bool:ShooterAt(const Float:center[3], const Float:dir[3], Float:range, const Float:aim[3], lo, hi)
+{
+	new a = g_P[0], b = g_P[1]
+	new Float:shooter[3], Float:end[3], Float:eye[3], Float:ofs[3], Float:frac
+	pev(a, pev_view_ofs, ofs)
+	shooter[0] = center[0] - dir[0] * range
+	shooter[1] = center[1] - dir[1] * range
+	shooter[2] = center[2]
+	new tr = create_tr2(), bool:found = false
+	engfunc(EngFunc_TraceHull, shooter, shooter, DONT_IGNORE_MONSTERS, HULL_HUMAN, a, tr)
+	if (!get_tr2(tr, TR_StartSolid) && !get_tr2(tr, TR_AllSolid))
+	{
+		end = shooter
+		end[2] -= 4.0
+		engfunc(EngFunc_TraceHull, shooter, end, IGNORE_MONSTERS, HULL_HUMAN, a, tr)
+		get_tr2(tr, TR_flFraction, frac)
+		if (frac < 1.0)
+		{
+			for (new k = 0; k < 3; k++)
+				eye[k] = shooter[k] + ofs[k]
+			engfunc(EngFunc_TraceLine, eye, aim, DONT_IGNORE_MONSTERS, a, tr)
+			new group = get_tr2(tr, TR_iHitgroup)
+			if (get_tr2(tr, TR_pHit) == b && group >= lo && group <= hi)
+			{
+				engfunc(EngFunc_SetOrigin, a, shooter)
+				set_pev(a, pev_velocity, Float:{0.0, 0.0, 0.0})
+				bench_puppet_look_at(a, aim)
+				found = true
+			}
+		}
+	}
+	free_tr2(tr)
+	return found
+}
+
+bool:GroupShotAt(const Float:center[3], Float:range, lo, hi, Float:height, Float:far)
+{
+	new b = g_P[1]
+	new tr = create_tr2()
+	engfunc(EngFunc_TraceHull, center, center, DONT_IGNORE_MONSTERS, HULL_HUMAN, b, tr)
+	new bool:blocked = get_tr2(tr, TR_StartSolid) || get_tr2(tr, TR_AllSolid)
+	free_tr2(tr)
+	if (blocked)
+		return false
+	engfunc(EngFunc_SetOrigin, b, center)
+	set_pev(b, pev_velocity, Float:{0.0, 0.0, 0.0})
+	new Float:aim[3]
+	aim = center
+	aim[2] += height
+	for (new i = 0; i < 8; i++)
+	{
+		new Float:dir[3]
+		dir[0] = floatcos(float(i) * 45.0, degrees)
+		dir[1] = floatsin(float(i) * 45.0, degrees)
+		if (far > 0.0 && (!ShooterAt(center, dir, far, aim, lo, hi)
+			|| !ShooterAt(center, dir, far + 10.0, aim, lo, hi) || !ShooterAt(center, dir, far + 20.0, aim, lo, hi)))
+			continue
+		if (ShooterAt(center, dir, range, aim, lo, hi))
+		{
+			g_LineDir = dir
+			return true
+		}
+	}
+	return false
+}
+
+// ---------------------------------------------------------------------------------------------
+// Range falloff: a bullet's damage index is its distance over the caliber's range unit, truncated.
+// The Raging Bull's .454 Casull has a range unit of 20 and full damage up to index 10, so a hit from
+// 215 units (index 10.75) does the full damage of one from close by (rounded, index 11, it would do
+// 95%). Two real shots at the target's body or arms (hit groups 2 to 5, which take a bullet's damage
+// as it is), from about 60 and then from 210 to 220 units; the distance is the shot's own trace,
+// from the gun to where it meets the target.
+
+#define RAGINGBULL	31
+
+new Float:g_TraceDist
+new g_TraceGroup
+new g_Losses[2]
+new Float:g_Dists[2]
+new Float:g_Center[3]
+new const Float:g_ChestHeights[] = {8.0, 4.0, 12.0}
+
+// The shooter's first trace while armed for a falloff shot (g_Watch 3): its length to where it met
+// the target, and the hit group there.
+public on_trace_falloff(const Float:v1[3], const Float:v2[3], noMonsters, skip, tr)
+{
+	if (g_Watch == 3 && skip == g_P[0] && g_TraceGroup == -1 && get_tr2(tr, TR_pHit) == g_P[1])
+	{
+		new Float:end[3]
+		get_tr2(tr, TR_vecEndPos, end)
+		g_TraceDist = get_distance_f(v1, end)
+		g_TraceGroup = get_tr2(tr, TR_iHitgroup)
+	}
+	return FMRES_IGNORED
+}
+
+public test_range_falloff_truncates_the_index()
+{
+	bench_set_timeout(60.0)
+	g_P[0] = bench_puppet("rangeshooter")
+	g_P[1] = bench_puppet("rangetarget")
+	ASSERT(g_P[0] > 0 && g_P[1] > 0)
+	set_cvar_num("realbullet", 0)
+	g_Shots = 0
+	bench_puppet_spawn(g_P[1], "range_target", 20.0, "respawn")
+}
+
+public range_target(id)
+{
+	bench_puppet_spawn(g_P[0], "range_shooter", 20.0, "respawn")
+}
+
+public range_shooter(id)
+{
+	ts_giveweapon(id, RAGINGBULL, 2, 0)
+	bench_next("range_aim", 1.5)
+}
+
+public range_aim()
+{
+	ASSERT(is_user_alive(g_P[0]) && is_user_alive(g_P[1]))
+	ASSERT(PlaceForGroupShot(60.0, 2, 5, g_ChestHeights, sizeof(g_ChestHeights), 215.0))
+	pev(g_P[1], pev_origin, g_Center)
+	range_fire()
+}
+
+range_fire()
+{
+	set_pev(g_P[1], pev_armorvalue, 0.0)
+	set_pev(g_P[1], pev_health, 500.0)
+	g_TraceGroup = -1
+	g_TraceDist = 0.0
+	g_FireTime = 0.0
+	g_Pressing = 0
+	g_Watch = 3
+	bench_wait_until("pierce_one_shot", "range_shot", 5.0, g_P[0])
+}
+
+public range_shot(id)
+{
+	bench_next("range_hit", 0.2)
+}
+
+public range_hit()
+{
+	g_Watch = 0
+	ASSERT(g_FireTime > 0.0)
+	new Float:hp
+	pev(g_P[1], pev_health, hp)
+	g_Losses[g_Shots] = 500 - floatround(hp, floatround_ceil)
+	g_Dists[g_Shots] = g_TraceDist
+	server_print("ts_gamerules: Raging Bull from %.1f units (index %.2f), hit group %d, took %d",
+		g_TraceDist, g_TraceDist / 20.0, g_TraceGroup, g_Losses[g_Shots])
+	ASSERT(g_TraceGroup >= 2 && g_TraceGroup <= 5)
+	if (++g_Shots == 1)
+	{
+		// back along the same line, so the hit is 215 units off; the target back where he stood
+		ASSERT(g_TraceDist < 190.0)
+		engfunc(EngFunc_SetOrigin, g_P[1], g_Center)
+		set_pev(g_P[1], pev_velocity, Float:{0.0, 0.0, 0.0})
+		new Float:aim[3], Float:range = 60.0 + 215.0 - g_TraceDist
+		new bool:placed = false
+		for (new h = 0; h < sizeof(g_ChestHeights) && !placed; h++)
+		{
+			aim = g_Center
+			aim[2] += g_ChestHeights[h]
+			placed = ShooterAt(g_Center, g_LineDir, range, aim, 2, 5)
+		}
+		ASSERT(placed)
+		// the gun ready again
+		bench_next("range_again", 1.0)
+		return
+	}
+	ASSERT(g_Dists[1] >= 210.5 && g_Dists[1] <= 219.5)
+	ASSERT_EQ(g_Losses[1], g_Losses[0])
+	bench_pass()
+}
+
+public range_again()
+{
+	range_fire()
+}
+
+// ---------------------------------------------------------------------------------------------
+// With all 256 bullet slots in flight, the next bullet is not made and everyone is told
+// "WARNING:cannot create bullet!" (talk). Six players in slow pause (their bullets fly at a fortieth
+// of full speed, about 330 units a second) fire USAS-12 shotguns (eight pellets a shot) down the
+// longest line they have.
+
+#define USAS12	11
+#define SLOTS_SHOOTERS	6
+
+new g_Slots[SLOTS_SHOOTERS]
+new g_SlotsSpawned
+
+public test_full_bullet_slots_warn()
+{
+	bench_set_timeout(60.0)
+	set_cvar_num("realbullet", 0)
+	for (new i = 0; i < SLOTS_SHOOTERS; i++)
+	{
+		new name[16]
+		formatex(name, charsmax(name), "slots%d", i)
+		g_Slots[i] = bench_puppet(name)
+		ASSERT(g_Slots[i] > 0)
+	}
+	g_SlotsSpawned = 0
+	bench_puppet_spawn(g_Slots[0], "slots_spawned", 20.0, "respawn")
+}
+
+public slots_spawned(id)
+{
+	if (++g_SlotsSpawned < SLOTS_SHOOTERS)
+	{
+		bench_puppet_spawn(g_Slots[g_SlotsSpawned], "slots_spawned", 20.0, "respawn")
+		return
+	}
+	for (new i = 0; i < SLOTS_SHOOTERS; i++)
+	{
+		ts_giveweapon(g_Slots[i], USAS12, 10, 0)
+		ts_set_fakeslowpause(g_Slots[i], 30.0)
+	}
+	bench_next("slots_fire", 1.5)
+}
+
+Float:FaceLongest(id)
+{
+	new Float:dir[3]
+	return FaceLongestDir(id, dir)
+}
+
+// Faces the longest level line from id's eyes of 32 directions; returns its length, and its
+// direction in dir.
+Float:FaceLongestDir(id, Float:dir[3])
+{
+	new Float:origin[3], Float:ofs[3], Float:eye[3], Float:end[3], Float:best = 0.0, Float:bestyaw = 0.0
+	new Float:frac
+	pev(id, pev_origin, origin)
+	pev(id, pev_view_ofs, ofs)
+	for (new k = 0; k < 3; k++)
+		eye[k] = origin[k] + ofs[k]
+	new tr = create_tr2()
+	for (new i = 0; i < 32; i++)
+	{
+		new Float:yaw = float(i) * 11.25
+		end[0] = eye[0] + floatcos(yaw, degrees) * 8192.0
+		end[1] = eye[1] + floatsin(yaw, degrees) * 8192.0
+		end[2] = eye[2]
+		engfunc(EngFunc_TraceLine, eye, end, IGNORE_MONSTERS, id, tr)
+		get_tr2(tr, TR_flFraction, frac)
+		if (frac * 8192.0 > best)
+		{
+			best = frac * 8192.0
+			bestyaw = yaw
+		}
+	}
+	free_tr2(tr)
+	new Float:angles[3]
+	angles[1] = bestyaw
+	bench_puppet_angles(id, angles)
+	dir[0] = floatcos(bestyaw, degrees)
+	dir[1] = floatsin(bestyaw, degrees)
+	dir[2] = 0.0
+	return best
+}
+
+public slots_fire()
+{
+	for (new i = 0; i < SLOTS_SHOOTERS; i++)
+	{
+		ASSERT(is_user_alive(g_Slots[i]))
+		new Float:length = FaceLongest(g_Slots[i])
+		server_print("ts_gamerules: shooter %d fires down %.0f units", i, length)
+		bench_puppet_input(g_Slots[i], IN_ATTACK)
+	}
+	bench_next("slots_counted", 3.0)
+}
+
+public slots_counted()
+{
+	for (new i = 0; i < SLOTS_SHOOTERS; i++)
+		bench_puppet_input(g_Slots[i], 0)
+	new warned = bench_msg_count(g_Slots[0], "TextMsg", "cannot create bullet")
+	// reTS draws each flying bullet with a head sprite; the original draws none
+	new heads = 0, ent = -1
+	while ((ent = engfunc(EngFunc_FindEntityByString, ent, "model", "sprites/shotgun_pellets.spr")) > 0)
+		heads++
+	server_print("ts_gamerules: %d bullet heads in flight, warned %d times", heads, warned)
+	ASSERT_MSG(g_Slots[0], "TextMsg", "WARNING:cannot create bullet!")
+	// the bullets land (within five seconds at that speed) while their shooters are still here
+	bench_next("slots_landed", 6.0)
+}
+
+public slots_landed()
+{
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// In The One mode the team list's first name is not a team: "The ONE" takes its place, so with the
+// teams "alpha;bravo;charlie" a player who is not The One (the first to join, before the first
+// selection ten seconds into the map) is in "bravo". The server is put in The One mode for the
+// test, with that list; game.cfg is put aside as for the repeated team name test.
+
+public test_the_one_replaces_the_first_team()
+{
+	bench_set_timeout(120.0)
+	new v[256]
+	get_cvar_string("mp_teamlist", v, charsmax(v))
+	set_localinfo("tsgr_teamlist", v)
+	get_cvar_string("mp_teammodels", v, charsmax(v))
+	set_localinfo("tsgr_teammodels", v)
+	set_localinfo("tsgr_teamplay", get_cvar_num("mp_teamplay") ? "1" : "0")
+	set_localinfo("tsgr_theone", get_cvar_num("mp_theonemode") ? "1" : "0")
+	set_cvar_num("mp_theonemode", 1)
+	set_cvar_string("mp_teamlist", "alpha;bravo;charlie")
+	SetGameCfgAside()
+	bench_change_map(g_Map, "one_map")
+}
+
+public one_map()
+{
+	RestoreGameCfg()
+	g_P[0] = bench_puppet("notone")
+	ASSERT(g_P[0] > 0)
+	bench_puppet_spawn(g_P[0], "one_spawned", 9.0, "respawn")
+}
+
+public one_spawned(id)
+{
+	new team[32]
+	get_user_team(id, team, charsmax(team))
+	server_print("ts_gamerules: in The One mode with alpha;bravo;charlie the first player is in %s", team)
+	// 1: in bravo; 2: not in alpha
+	new result = (equal(team, "bravo") ? 1 : 0) | (!equal(team, "alpha") ? 2 : 0)
+	RestoreTeamCvars()
+	bench_change_map(g_Map, "one_restored", result)
+}
+
+public one_restored(result)
+{
+	ASSERT(result & 2)
+	ASSERT(result & 1)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// A ts_mapglobals keeps its two saved fields (player_respawn_num, player_at_a_time_num) through
+// Spawn: values put there before it spawns are there after. Their places in the entity are
+// MAPGLOBALS_RESPAWN_NUM and MAPGLOBALS_AT_A_TIME_NUM (fakemeta pdata offsets, set at the top).
+
+public test_mapglobals_keeps_its_saved_fields()
+{
+	new ent = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "ts_mapglobals"))
+	ASSERT(ent > 0)
+	set_pdata_int(ent, MAPGLOBALS_RESPAWN_NUM, 1234, 0)
+	set_pdata_int(ent, MAPGLOBALS_AT_A_TIME_NUM, 5678, 0)
+	dllfunc(DLLFunc_Spawn, ent)
+	new respawn = get_pdata_int(ent, MAPGLOBALS_RESPAWN_NUM, 0)
+	new atatime = get_pdata_int(ent, MAPGLOBALS_AT_A_TIME_NUM, 0)
+	engfunc(EngFunc_RemoveEntity, ent)
+	server_print("ts_gamerules: ts_mapglobals after Spawn: player_respawn_num %d, player_at_a_time_num %d",
+		respawn, atatime)
+	ASSERT_EQ(respawn, 1234)
+	ASSERT_EQ(atatime, 5678)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// A bullet in flight when the map changes does not fly on in the new map. A player in slow pause
+// fires one Glock shot down his longest line (its bullet takes seconds to get there) and the map
+// changes a fifth of a second later. On the new map a player stands in the old shooter's place in
+// the player list (a bullet goes on only while its shooter's slot holds a player) and another near
+// the end of that line, past where the bullet was; neither is hurt once the new map's clock has
+// passed the old one's (when an old bullet would move again) by three seconds.
+
+#define INFLIGHT_KEY "tsgr_inflight"
+
+new Float:g_InflightEnd[3]
+new Float:g_InflightUntil
+new g_InflightOwner
+
+public test_bullet_in_flight_ends_with_the_map()
+{
+	// the new map runs until its clock passes this one's
+	bench_set_timeout(get_gametime() + 120.0)
+	g_P[0] = bench_puppet("inflight")
+	ASSERT(g_P[0] > 0)
+	set_cvar_num("realbullet", 0)
+	bench_puppet_spawn(g_P[0], "inflight_spawned", 20.0, "respawn")
+}
+
+public inflight_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	ts_set_fakeslowpause(id, 30.0)
+	bench_next("inflight_aim", 1.5, id)
+}
+
+public inflight_aim(id)
+{
+	new Float:dir[3]
+	new Float:length = FaceLongestDir(id, dir)
+	server_print("ts_gamerules: the in-flight shot goes down %.0f units", length)
+	ASSERT(length > 600.0)
+	new Float:origin[3]
+	pev(id, pev_origin, origin)
+	for (new k = 0; k < 2; k++)
+		g_InflightEnd[k] = origin[k] + dir[k] * (length - 40.0)
+	g_InflightEnd[2] = origin[2]
+	g_FireTime = 0.0
+	g_Pressing = 0
+	bench_wait_until("pierce_one_shot", "inflight_shot", 5.0, id)
+}
+
+public inflight_shot(id)
+{
+	bench_next("inflight_change", 0.2, id)
+}
+
+public inflight_change(id)
+{
+	// reTS draws a flying bullet with a trail and a head sprite; where they were is printed on the
+	// new map with what is there then (the old bullet's handles to them name those places)
+	new beam = engfunc(EngFunc_FindEntityByString, -1, "model", "sprites/bullet_trail.spr")
+	new head = engfunc(EngFunc_FindEntityByString, -1, "model", "sprites/shotgun_pellets.spr")
+	new v[128]
+	formatex(v, charsmax(v), "%d %f %f %f %f %d %d", id, get_gametime(), g_InflightEnd[0], g_InflightEnd[1],
+		g_InflightEnd[2], beam, head)
+	set_localinfo(INFLIGHT_KEY, v)
+	bench_change_map(g_Map, "inflight_map")
+}
+
+public inflight_map()
+{
+	new v[128], parts[7][24]
+	get_localinfo(INFLIGHT_KEY, v, charsmax(v))
+	set_localinfo(INFLIGHT_KEY, "")
+	ASSERT(v[0] != 0)
+	parse(v, parts[0], 23, parts[1], 23, parts[2], 23, parts[3], 23, parts[4], 23, parts[5], 23, parts[6], 23)
+	g_InflightOwner = str_to_num(parts[0])
+	g_InflightUntil = str_to_float(parts[1]) + 3.0
+	for (new k = 0; k < 3; k++)
+		g_InflightEnd[k] = str_to_float(parts[2 + k])
+	for (new i = 5; i <= 6; i++)
+	{
+		new e = str_to_num(parts[i]), name[32]
+		if (e > 0 && pev_valid(e))
+			pev(e, pev_classname, name, charsmax(name))
+		server_print("ts_gamerules: old bullet %s was entity %d, now %s", i == 5 ? "trail" : "head", e,
+			name[0] ? name : "free")
+	}
+	// the stand-in for the shooter takes his slot: the first free one, as his was
+	g_P[0] = bench_puppet("inflight2")
+	g_P[1] = bench_puppet("inflighttarget")
+	ASSERT(g_P[0] > 0 && g_P[1] > 0)
+	server_print("ts_gamerules: old shooter slot %d, new players %d and %d", g_InflightOwner, g_P[0], g_P[1])
+	ASSERT_EQ(g_P[0], g_InflightOwner)
+	bench_puppet_spawn(g_P[0], "inflight_owner_in", 20.0, "respawn")
+}
+
+public inflight_owner_in(id)
+{
+	bench_puppet_spawn(g_P[1], "inflight_target_in", 20.0, "respawn")
+}
+
+public inflight_target_in(id)
+{
+	engfunc(EngFunc_SetOrigin, id, g_InflightEnd)
+	set_pev(id, pev_velocity, Float:{0.0, 0.0, 0.0})
+	set_pev(id, pev_health, 500.0)
+	set_pev(g_P[0], pev_health, 500.0)
+	server_print("ts_gamerules: waiting until %.1f (now %.1f)", g_InflightUntil, get_gametime())
+	bench_wait_until("inflight_passed", "inflight_done", g_InflightUntil - get_gametime() + 5.0, id)
+}
+
+public bool:inflight_passed(id)
+{
+	// the target stays where the bullet would pass
+	engfunc(EngFunc_SetOrigin, id, g_InflightEnd)
+	set_pev(id, pev_velocity, Float:{0.0, 0.0, 0.0})
+	return get_gametime() > g_InflightUntil
+}
+
+public inflight_done(id)
+{
+	new Float:hp[2]
+	pev(g_P[0], pev_health, hp[0])
+	pev(g_P[1], pev_health, hp[1])
+	server_print("ts_gamerules: after the old map's clock, health %.0f (stand-in) and %.0f (target)", hp[0], hp[1])
+	ASSERT(is_user_alive(g_P[1]))
+	ASSERT_EQ(floatround(hp[1]), 500)
+	ASSERT_EQ(floatround(hp[0]), 500)
 	bench_pass()
 }
