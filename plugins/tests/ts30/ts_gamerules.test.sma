@@ -1677,6 +1677,7 @@ new Float:g_TraceDist
 new g_TraceGroup
 new g_Losses[2]
 new Float:g_Dists[2]
+new Float:g_Range
 new Float:g_Center[3]
 new const Float:g_ChestHeights[] = {8.0, 4.0, 12.0}
 
@@ -1747,33 +1748,52 @@ public range_hit()
 	ASSERT(g_FireTime > 0.0)
 	new Float:hp
 	pev(g_P[1], pev_health, hp)
-	g_Losses[g_Shots] = 500 - floatround(hp, floatround_ceil)
-	g_Dists[g_Shots] = g_TraceDist
+	new shot = g_Shots ? 1 : 0
+	g_Losses[shot] = 500 - floatround(hp, floatround_ceil)
+	g_Dists[shot] = g_TraceDist
 	server_print("ts_gamerules: Raging Bull from %.1f units (index %.2f), hit group %d, took %d",
-		g_TraceDist, g_TraceDist / 20.0, g_TraceGroup, g_Losses[g_Shots])
+		g_TraceDist, g_TraceDist / 20.0, g_TraceGroup, g_Losses[shot])
 	ASSERT(g_TraceGroup >= 2 && g_TraceGroup <= 5)
-	if (++g_Shots == 1)
+	if (g_Shots++ == 0)
 	{
-		// back along the same line, so the hit is 215 units off; the target back where he stood
+		// back along the same line, so the hit is 215 units off
 		ASSERT(g_TraceDist < 190.0)
-		engfunc(EngFunc_SetOrigin, g_P[1], g_Center)
-		set_pev(g_P[1], pev_velocity, Float:{0.0, 0.0, 0.0})
-		new Float:aim[3], Float:range = 60.0 + 215.0 - g_TraceDist
-		new bool:placed = false
-		for (new h = 0; h < sizeof(g_ChestHeights) && !placed; h++)
-		{
-			aim = g_Center
-			aim[2] += g_ChestHeights[h]
-			placed = ShooterAt(g_Center, g_LineDir, range, aim, 2, 5)
-		}
-		ASSERT(placed)
+		g_Range = 60.0 + 215.0 - g_TraceDist
+		ASSERT(range_place())
 		// the gun ready again
 		bench_next("range_again", 1.0)
 		return
 	}
-	ASSERT(g_Dists[1] >= 210.5 && g_Dists[1] <= 219.5)
+	// The hit point is on an arm or the body, and an arm moves with the pose, so a shot can meet him
+	// some units nearer or farther than the one before. The distance that counts is the one this shot's
+	// own trace measured; when it falls outside 210.5 to 219.5, the shooter moves by the difference and
+	// fires again (the Raging Bull holds five).
+	if (g_Dists[1] < 210.5 || g_Dists[1] > 219.5)
+	{
+		ASSERT(g_Shots < 5)
+		g_Range += 215.0 - g_TraceDist
+		ASSERT(range_place())
+		bench_next("range_again", 1.0)
+		return
+	}
 	ASSERT_EQ(g_Losses[1], g_Losses[0])
 	bench_pass()
+}
+
+// The shooter g_Range units back along the line, aiming at the target back where he stood.
+bool:range_place()
+{
+	engfunc(EngFunc_SetOrigin, g_P[1], g_Center)
+	set_pev(g_P[1], pev_velocity, Float:{0.0, 0.0, 0.0})
+	new Float:aim[3]
+	for (new h = 0; h < sizeof(g_ChestHeights); h++)
+	{
+		aim = g_Center
+		aim[2] += g_ChestHeights[h]
+		if (ShooterAt(g_Center, g_LineDir, g_Range, aim, 2, 5))
+			return true
+	}
+	return false
 }
 
 public range_again()

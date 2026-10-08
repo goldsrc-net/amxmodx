@@ -10,7 +10,8 @@
 //
 // Tests for what the original The Specialists 3.0 does with a player's powerup each frame: a dead
 // player's powerup goes back into the world where he lies, so does a spectator's, and a running
-// superjump powerup lowers his gravity. ../ts_powerup_state.test.sma is the same on reTS.
+// superjump powerup lowers his gravity; whatever lowers it, landing puts it back.
+// ../ts_powerup_state.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -216,6 +217,54 @@ public floater_over(id)
 {
 	ASSERT_EQ(ts_is_running_powerup(id), 0)
 	ASSERT_NEAR(g_PreGravity, 1.0)
+	new Float:gravity
+	pev(id, pev_gravity, gravity)
+	ASSERT_NEAR(gravity, 1.0)
+	bench_pass()
+}
+
+// Whatever lowers a player's gravity (a plugin here), the game puts it back to 1.0 once he is on the
+// ground: PostThink sets it for a player on the ground every frame (@0x8186f). In the air it stays.
+public test_landing_gives_normal_gravity_back()
+{
+	new id = bench_puppet("lander")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "lander_spawned", 20.0, "respawn")
+}
+
+public bool:on_ground(id)
+{
+	return (pev(id, pev_flags) & FL_ONGROUND) != 0
+}
+
+public lander_spawned(id)
+{
+	bench_wait_until("on_ground", "lander_standing", 3.0, id)
+}
+
+public lander_standing(id)
+{
+	// 48 units up with half gravity: he falls for about half a second.
+	new Float:origin[3]
+	pev(id, pev_origin, origin)
+	origin[2] += 48.0
+	engfunc(EngFunc_SetOrigin, id, origin)
+	set_pev(id, pev_flags, pev(id, pev_flags) & ~FL_ONGROUND)
+	set_pev(id, pev_gravity, 0.5)
+	bench_next("lander_falling", 0.1, id)
+}
+
+public lander_falling(id)
+{
+	ASSERT_FALSE(on_ground(id))
+	new Float:gravity
+	pev(id, pev_gravity, gravity)
+	ASSERT_NEAR(gravity, 0.5)
+	bench_wait_until("on_ground", "lander_landed", 3.0, id)
+}
+
+public lander_landed(id)
+{
 	new Float:gravity
 	pev(id, pev_gravity, gravity)
 	ASSERT_NEAR(gravity, 1.0)
