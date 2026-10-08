@@ -10,7 +10,9 @@
 //
 // Tests for the original The Specialists 3.0's spectators: a joiner chases a player (observer mode
 // 2) and keeps that mode after dying, a joiner in last man standing is told the round clock, and a
-// spectator's pose (TSState) is not refreshed. ../ts_observer.test.sma is the same on reTS.
+// spectator's pose (TSState) is not refreshed. The observer controls: jump cycles the mode, forward
+// watches the next player, a dead target is replaced, and with nobody to watch the spectator roams
+// without a message. ../ts_observer.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -19,10 +21,15 @@
 #include <fakemeta>
 #include <amxxbench>
 
+#define OBS_CHASE_LOCKED	1
 #define OBS_CHASE_FREE	2
+#define OBS_ROAMING	3
 
 new g_Map[32]
 new g_Helper
+new g_Helper2
+new g_Target
+new g_Step[32]
 new g_Lms
 new g_RoundTime
 new BenchMsg:g_Mark
@@ -229,5 +236,128 @@ public posed_later(id)
 	ASSERT(pev(id, pev_flags) & FL_DUCKING)
 	ASSERT_FALSE(PoseSent(id, 1))
 	set_pev(id, pev_flags, pev(id, pev_flags) & ~FL_DUCKING)
+	bench_pass()
+}
+
+// The other live helper, or 0.
+OtherHelper(target)
+{
+	return target == g_Helper ? g_Helper2 : (target == g_Helper2 ? g_Helper : 0)
+}
+
+// Two live players and a spectator chasing one of them.
+StartTwoAndASpectator(const step[])
+{
+	copy(g_Step, charsmax(g_Step), step)
+	g_Helper = bench_puppet("watchone")
+	ASSERT(g_Helper > 0)
+	bench_puppet_spawn(g_Helper, "first_alive", 20.0, "respawn")
+}
+
+public first_alive(helper)
+{
+	g_Helper2 = bench_puppet("watchtwo")
+	ASSERT(g_Helper2 > 0)
+	bench_puppet_spawn(g_Helper2, "second_alive", 20.0, "respawn")
+}
+
+public second_alive(helper)
+{
+	new id = bench_puppet("spec")
+	ASSERT(id > 0)
+	bench_wait_until("is_dead", g_Step, 2.0, id)
+}
+
+// Jump steps the mode: chase (2) to locked chase (1).
+public test_jump_cycles_the_mode()
+{
+	StartTwoAndASpectator("jumper_spectating")
+}
+
+public jumper_spectating(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_FREE)
+	bench_puppet_press(id, IN_JUMP, "jumper_pressed")
+}
+
+public jumper_pressed(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_LOCKED)
+	ASSERT(OtherHelper(pev(id, pev_iuser2)) != 0)
+	bench_pass()
+}
+
+// Forward moves to the next player.
+public test_forward_watches_the_next_player()
+{
+	StartTwoAndASpectator("forward_spectating")
+}
+
+public forward_spectating(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_FREE)
+	g_Target = pev(id, pev_iuser2)
+	ASSERT(OtherHelper(g_Target) != 0)
+	bench_puppet_press(id, IN_FORWARD, "forward_pressed")
+}
+
+public forward_pressed(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_FREE)
+	ASSERT_EQ(pev(id, pev_iuser2), OtherHelper(g_Target))
+	bench_pass()
+}
+
+// When the watched player dies, the spectator moves on to someone alive.
+public test_dead_target_is_replaced()
+{
+	StartTwoAndASpectator("idle_spectating")
+}
+
+public idle_spectating(id)
+{
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_CHASE_FREE)
+	g_Target = pev(id, pev_iuser2)
+	ASSERT(OtherHelper(g_Target) != 0)
+	user_kill(g_Target)
+	bench_wait_until("target_moved", "idle_moved", 4.0, id)
+}
+
+public bool:target_moved(id)
+{
+	return pev(id, pev_iuser2) != g_Target
+}
+
+public idle_moved(id)
+{
+	ASSERT(!is_user_alive(g_Target))
+	ASSERT_EQ(pev(id, pev_iuser2), OtherHelper(g_Target))
+	ASSERT(is_user_alive(OtherHelper(g_Target)))
+	bench_pass()
+}
+
+// With nobody alive to watch, a joiner roams (mode 3, max speed 420) and is told nothing.
+public test_nobody_to_watch_roams_silently()
+{
+	new id = bench_puppet("loner")
+	ASSERT(id > 0)
+	bench_wait_until("is_dead", "loner_spectating", 2.0, id)
+}
+
+public loner_spectating(id)
+{
+	bench_next("loner_later", 0.5, id)
+}
+
+public loner_later(id)
+{
+	new Float:speed
+	pev(id, pev_maxspeed, speed)
+	server_print("ts_observer: loner mode %d, max speed %.1f, #Spec messages %d", pev(id, pev_iuser1),
+		speed, bench_msg_count(id, "", "#Spec_"))
+	ASSERT_EQ(pev(id, pev_iuser1), OBS_ROAMING)
+	ASSERT_EQ(pev(id, pev_iuser2), 0)
+	ASSERT(speed == 420.0)
+	ASSERT_EQ(bench_msg_count(id, "", "#Spec_"), 0)
 	bench_pass()
 }
