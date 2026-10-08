@@ -15,7 +15,10 @@
 // player 32 has no vote, a teamplay player spawns at his team's spot and wears one of his team's
 // models, the custom weapon damages notice shows only where the cheats are on, the custom weapons
 // notice ends with the map, the bot commands answer, and a player with no spawn spot is spawned
-// silently.
+// silently. Kevlar takes 21.25% off a bullet to the body; a flying bullet makes no sound or mark
+// where it hits and goes on through a player; a team list's repeated name keeps its place; a
+// spectator votes, for the first word after "map", and "vote stats" lists the last count; a
+// ts_mapglobals thinks once.
 // ../ts_gamerules.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -23,6 +26,7 @@
 
 #include <amxmodx>
 #include <fakemeta>
+#include <hamsandwich>
 #include <tsfun>
 #include <amxxbench>
 
@@ -47,8 +51,14 @@ public plugin_init()
 {
 	register_plugin("TS Game Rules Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	get_mapname(g_Map, charsmax(g_Map))
+	RestoreGameCfg()
 	register_forward(FM_PlaybackEvent, "on_event")
 	register_forward(FM_StartFrame, "on_frame")
+	register_forward(FM_StartFrame, "on_frame_hits")
+	register_forward(FM_EmitSound, "on_sound")
+	register_forward(FM_MessageBegin, "on_message_begin")
+	register_forward(FM_WriteByte, "on_write_byte")
+	register_forward(FM_TraceLine, "on_trace", 1)
 }
 
 public bench_setup()
@@ -62,6 +72,8 @@ public bench_setup()
 
 public bench_teardown()
 {
+	// the team settings the repeated team name test saved, if it ended before it put them back
+	RestoreTeamCvars()
 	set_cvar_num("realbullet", g_RealBullet)
 	set_cvar_num("mp_friendlyfire", g_FriendlyFire)
 	if (g_Teamplay)
@@ -149,24 +161,23 @@ public Released(id)
 }
 
 // Stands a dist units from b's bounds, facing b's middle; the farthest of a few distances there is
-// room for.
+// room for. He looks level, along the line from his eyes that bench_puppet_face found reaches b:
+// aimed down at b's origin instead, a shot can meet a low wall or railing that line passes over.
 Float:FaceFar(a, b)
 {
 	new Float:dists[] = {600.0, 450.0, 300.0}
 	for (new i = 0; i < sizeof(dists); i++)
 		if (bench_puppet_face(a, b, dists[i]))
-		{
-			new Float:target[3]
-			pev(b, pev_origin, target)
-			bench_puppet_look_at(a, target)
 			return dists[i]
-		}
 	return 0.0
 }
 
 // ---------------------------------------------------------------------------------------------
-// realbullet: with it on, a bullet flies to its target (a few frames at 13200 units a second for
-// the Glock's 9 mm) instead of hitting it the frame it is fired.
+// realbullet: with it on, a bullet flies to its target instead of hitting it the frame it is
+// fired. With realbullet 1 a bullet moves every 0.05 s by that much flight (13200 units a second for
+// the Glock's 9 mm, 660 units a step), starting at the rules' next think, so it hits within 0.03 s
+// (flying a frame at a time, it would take 0.045 s from 600 units, the distance used when there is
+// room).
 
 public test_realbullet_bullets_fly()
 {
@@ -224,9 +235,10 @@ public real_landed(id)
 		return
 	}
 	server_print("ts_gamerules: hit %.3f s after the shot, then %.3f s with realbullet 1", g_Delay[0], g_Delay[1])
-	// the frame it is fired, then at least a frame later
+	// the frame it is fired, then at least a frame later, within the first step
 	ASSERT(g_Delay[0] < 0.005)
 	ASSERT(g_Delay[1] > g_Delay[0] + 0.005)
+	ASSERT(g_Delay[1] < 0.03)
 	bench_pass()
 }
 
@@ -774,7 +786,7 @@ public test_spawn_without_spots_is_silent()
 	}
 	server_print("ts_gamerules: %d spawn spots renamed", g_SpotCount)
 	for (new i = 0; i < g_SpotCount; i++)
-		set_pev(g_Spots[i] & 0xffff, pev_classname, engfunc(EngFunc_AllocString, "tsgr_hidden_spot"))
+		set_pev(g_Spots[i] & 0xffff, pev_classname, "tsgr_hidden_spot")
 	g_Developer = 1
 	set_cvar_num("developer", 1)
 	g_P[0] = bench_puppet("nowhere")
@@ -799,9 +811,661 @@ public nowhere_counted(id)
 	set_cvar_num("developer", 0)
 	g_Developer = 0
 	for (new i = 0; i < g_SpotCount; i++)
-		set_pev(g_Spots[i] & 0xffff, pev_classname,
-			engfunc(EngFunc_AllocString, g_SpotClasses[g_Spots[i] >> 16]))
+		set_pev(g_Spots[i] & 0xffff, pev_classname, g_SpotClasses[g_Spots[i] >> 16])
 	g_SpotCount = 0
 	ASSERT_EQ(said, 0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Kevlar takes armor_absorb off a hit to the body, and every map starts with 0.2125: 40 points to
+// the chest take 31 with kevlar (armorvalue set), 40 without. A real shot (realbullet 0) at the
+// wearer's chest sets the hit group the game remembers for his next damage; TakeDamage then deals
+// the 40 twice, without and with kevlar. (TraceAttack is not called by hand: outside a shot the
+// game's pending multi-damage can name an entity long gone.)
+
+new g_ShotGroup
+new const g_LineSpots[][] = {"info_player_deathmatch", "info_player_team1", "info_player_team2",
+	"info_player_start"}
+new g_Watch
+new g_Pressing
+
+public test_kevlar_takes_a_fifth_off()
+{
+	bench_set_timeout(60.0)
+	g_P[0] = bench_puppet("kevlarshooter")
+	g_P[1] = bench_puppet("kevlarwearer")
+	ASSERT(g_P[0] > 0 && g_P[1] > 0)
+	set_cvar_num("realbullet", 0)
+	bench_puppet_spawn(g_P[1], "kevlar_wearer", 20.0, "respawn")
+}
+
+public kevlar_wearer(id)
+{
+	bench_puppet_spawn(g_P[0], "kevlar_shooter", 20.0, "respawn")
+}
+
+public kevlar_shooter(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	// past the spawn protection, with the gun out
+	bench_next("kevlar_aim", 1.5)
+}
+
+// The health the wearer loses to 40 points of bullet damage, with armor armorvalue.
+DamageLoss(armor)
+{
+	new id = g_P[1]
+	set_pev(id, pev_health, 100.0)
+	set_pev(id, pev_armorvalue, float(armor))
+	ExecuteHamB(Ham_TakeDamage, id, g_P[0], g_P[0], 40.0, DMG_BULLET)
+	new Float:health
+	pev(id, pev_health, health)
+	set_pev(id, pev_armorvalue, 0.0)
+	set_pev(id, pev_health, 100.0)
+	return 100 - floatround(health, floatround_floor)
+}
+
+public kevlar_aim()
+{
+	ASSERT(is_user_alive(g_P[0]) && is_user_alive(g_P[1]))
+	ASSERT(PlaceForChestShot())
+	set_pev(g_P[1], pev_health, 500.0)
+	g_ShotGroup = -1
+	g_FireTime = 0.0
+	g_Pressing = 0
+	g_Watch = 2
+	bench_wait_until("pierce_one_shot", "kevlar_shot", 5.0, g_P[0])
+}
+
+public kevlar_shot(id)
+{
+	bench_next("kevlar_hits", 0.2)
+}
+
+public kevlar_hits()
+{
+	g_Watch = 0
+	ASSERT(g_FireTime > 0.0)
+	server_print("ts_gamerules: the shot hit group %d", g_ShotGroup)
+	ASSERT(g_ShotGroup >= 2 && g_ShotGroup <= 5)
+	new plain = DamageLoss(0)
+	new kevlar = DamageLoss(100)
+	server_print("ts_gamerules: 40 points after a chest hit take %d, %d with kevlar", plain, kevlar)
+	ASSERT_EQ(plain, 40)
+	ASSERT_EQ(kevlar, 31)
+	bench_pass()
+}
+
+// The shooter's first trace while armed for the kevlar shot: the hit group it found on the wearer.
+public on_trace(const Float:v1[3], const Float:v2[3], noMonsters, skip, tr)
+{
+	if (g_Watch == 2 && skip == g_P[0] && g_ShotGroup == -1 && get_tr2(tr, TR_pHit) == g_P[1])
+		g_ShotGroup = get_tr2(tr, TR_iHitgroup)
+	return FMRES_IGNORED
+}
+
+// Stands the wearer at a spawn spot (where he is first, then each deathmatch and team spot) and the
+// shooter 200 units away on the first of eight compass lines with room and a floor for him, facing
+// a point 8 units above the wearer's origin, when a line from his eyes to there meets the wearer in
+// the chest, stomach or arms (hit group 2 to 5). Returns false if there is none.
+bool:PlaceForChestShot()
+{
+	new Float:center[3]
+	pev(g_P[1], pev_origin, center)
+	if (ChestShotAt(center))
+		return true
+	for (new c = 0; c < sizeof(g_LineSpots); c++)
+	{
+		new spot = -1
+		while ((spot = engfunc(EngFunc_FindEntityByString, spot, "classname", g_LineSpots[c])) > 0)
+		{
+			pev(spot, pev_origin, center)
+			center[2] += 1.0
+			if (ChestShotAt(center))
+				return true
+		}
+	}
+	return false
+}
+
+bool:ChestShotAt(const Float:center[3])
+{
+	new a = g_P[0], b = g_P[1]
+	new Float:shooter[3], Float:end[3], Float:eye[3], Float:ofs[3], Float:aim[3], Float:frac
+	pev(a, pev_view_ofs, ofs)
+	new tr = create_tr2(), bool:found = false
+	engfunc(EngFunc_TraceHull, center, center, DONT_IGNORE_MONSTERS, HULL_HUMAN, b, tr)
+	if (get_tr2(tr, TR_StartSolid) || get_tr2(tr, TR_AllSolid))
+	{
+		free_tr2(tr)
+		return false
+	}
+	engfunc(EngFunc_SetOrigin, b, center)
+	set_pev(b, pev_velocity, Float:{0.0, 0.0, 0.0})
+	aim = center
+	aim[2] += 8.0
+	for (new i = 0; i < 8 && !found; i++)
+	{
+		shooter[0] = center[0] - floatcos(float(i) * 45.0, degrees) * 200.0
+		shooter[1] = center[1] - floatsin(float(i) * 45.0, degrees) * 200.0
+		shooter[2] = center[2]
+		engfunc(EngFunc_TraceHull, shooter, shooter, DONT_IGNORE_MONSTERS, HULL_HUMAN, a, tr)
+		if (get_tr2(tr, TR_StartSolid) || get_tr2(tr, TR_AllSolid))
+			continue
+		end = shooter
+		end[2] -= 4.0
+		engfunc(EngFunc_TraceHull, shooter, end, IGNORE_MONSTERS, HULL_HUMAN, a, tr)
+		get_tr2(tr, TR_flFraction, frac)
+		if (frac >= 1.0)
+			continue
+		for (new k = 0; k < 3; k++)
+			eye[k] = shooter[k] + ofs[k]
+		engfunc(EngFunc_TraceLine, eye, aim, DONT_IGNORE_MONSTERS, a, tr)
+		new group = get_tr2(tr, TR_iHitgroup)
+		if (get_tr2(tr, TR_pHit) != b || group < 2 || group > 5)
+			continue
+		engfunc(EngFunc_SetOrigin, a, shooter)
+		set_pev(a, pev_velocity, Float:{0.0, 0.0, 0.0})
+		bench_puppet_look_at(a, aim)
+		found = true
+	}
+	free_tr2(tr)
+	return found
+}
+
+// ---------------------------------------------------------------------------------------------
+// A flying bullet (realbullet 1) that hits a wall makes no sound there and leaves no mark from the
+// server (the shooter's client plays both from the shot's event): no ricochet sound, and no gunshot
+// or decal temporary entity.
+
+new g_Ricochets
+new g_Marks
+new g_TempEnt
+
+public on_sound(ent, channel, const sample[])
+{
+	if (g_Watch && containi(sample, "ric") != -1)
+		g_Ricochets++
+	return FMRES_IGNORED
+}
+
+public on_message_begin(dest, type)
+{
+	g_TempEnt = g_Watch && type == SVC_TEMPENTITY
+	return FMRES_IGNORED
+}
+
+// The first byte of a temporary entity is its kind: TE_GUNSHOT 2, TE_DECAL 104, TE_GUNSHOTDECAL
+// 109, TE_WORLDDECAL 116, TE_DECALHIGH 105, TE_WORLDDECALHIGH 117.
+public on_write_byte(value)
+{
+	if (g_TempEnt)
+	{
+		g_TempEnt = 0
+		if (value == 2 || value == 104 || value == 105 || value == 109 || value == 116 || value == 117)
+			g_Marks++
+	}
+	return FMRES_IGNORED
+}
+
+public test_flying_bullet_hits_a_wall_silently()
+{
+	g_P[0] = bench_puppet("wallshooter")
+	ASSERT(g_P[0] > 0)
+	set_cvar_num("realbullet", 1)
+	bench_puppet_spawn(g_P[0], "wall_spawned", 20.0, "respawn")
+}
+
+public wall_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	// past the spawn protection, with the gun out, and the rules have read realbullet
+	bench_next("wall_fire", 1.5, id)
+}
+
+public wall_fire(id)
+{
+	// level, at the first wall within 4000 units of the eight compass points
+	new Float:origin[3], Float:ofs[3], Float:eye[3], Float:end[3], Float:frac
+	pev(id, pev_origin, origin)
+	pev(id, pev_view_ofs, ofs)
+	new tr = create_tr2(), Float:yaw = -1.0
+	for (new i = 0; i < 8 && yaw < 0.0; i++)
+	{
+		for (new k = 0; k < 3; k++)
+			eye[k] = origin[k] + ofs[k]
+		end[0] = eye[0] + floatcos(float(i) * 45.0, degrees) * 4000.0
+		end[1] = eye[1] + floatsin(float(i) * 45.0, degrees) * 4000.0
+		end[2] = eye[2]
+		engfunc(EngFunc_TraceLine, eye, end, IGNORE_MONSTERS, id, tr)
+		get_tr2(tr, TR_flFraction, frac)
+		new hit = get_tr2(tr, TR_pHit)
+		if (frac < 1.0 && (hit <= 0 || hit > get_maxplayers()))
+			yaw = float(i) * 45.0
+	}
+	free_tr2(tr)
+	ASSERT(yaw >= 0.0)
+	new Float:angles[3]
+	angles[1] = yaw
+	bench_puppet_angles(id, angles)
+	g_Ricochets = 0
+	g_Marks = 0
+	g_FireTime = 0.0
+	g_Watch = 1
+	Hold(id, IN_ATTACK, "wall_fired")
+}
+
+public wall_fired(id)
+{
+	bench_next("wall_counted", 1.0, id)
+}
+
+public wall_counted(id)
+{
+	g_Watch = 0
+	server_print("ts_gamerules: a flying bullet into a wall: fired %d, %d ricochet sounds, %d marks",
+		g_FireTime > 0.0, g_Ricochets, g_Marks)
+	ASSERT(g_FireTime > 0.0)
+	ASSERT_EQ(g_Ricochets, 0)
+	ASSERT_EQ(g_Marks, 0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// A flying bullet (realbullet 1) goes on through a player it hits when enough of it is left (the
+// damage times the ammo's pierce factor, halved through a body, over 5): one Five-seveN shot (5.7 mm
+// pierces fully) from 300 units at a player with another 96 units behind him hits twice, the front
+// player first. It goes on from just past the hit (10.5 units here), so the second hit is the back
+// player, or the front player again when that point is still inside him; the original does both.
+// (What each hit is for, and when, is printed.)
+
+#define FIVESEVEN	14
+
+new Float:g_Health[2]
+new g_Hits[2]
+new Float:g_FirstHit[2]
+
+public on_frame_hits()
+{
+	if (g_Watch != 1)
+		return FMRES_IGNORED
+	for (new i = 0; i < 2; i++)
+	{
+		new id = g_P[1 + i]
+		if (!is_user_alive(id))
+			continue
+		new Float:hp
+		pev(id, pev_health, hp)
+		if (hp < g_Health[i])
+		{
+			server_print("ts_gamerules: %.3f target %d hit for %.0f", get_gametime(), i + 1, g_Health[i] - hp)
+			if (!g_Hits[i]++)
+				g_FirstHit[i] = get_gametime()
+			g_Health[i] = hp
+		}
+	}
+	return FMRES_IGNORED
+}
+
+public test_flying_bullet_goes_through_a_player()
+{
+	bench_set_timeout(60.0)
+	g_P[0] = bench_puppet("pierceshooter")
+	g_P[1] = bench_puppet("piercefront")
+	g_P[2] = bench_puppet("pierceback")
+	ASSERT(g_P[0] > 0 && g_P[1] > 0 && g_P[2] > 0)
+	set_cvar_num("realbullet", 1)
+	g_Shots = 0
+	bench_puppet_spawn(g_P[0], "pierce_spawned", 20.0, "respawn")
+}
+
+public pierce_spawned(id)
+{
+	if (++g_Shots <= 2)
+	{
+		bench_puppet_spawn(g_P[g_Shots], "pierce_spawned", 20.0, "respawn")
+		return
+	}
+	ts_giveweapon(g_P[0], FIVESEVEN, 0, 0)
+	bench_next("pierce_place", 1.5)
+}
+
+// Puts the front player at a spawn spot (where he stands first, then each deathmatch and team spot
+// in turn), the shooter 300 units away and the back player 96 units behind the front one, on the
+// first of eight compass lines with room for all three, a floor under them and a clear line from
+// the shooter's eyes to the back player's middle, along which the shooter aims: it meets the front
+// player in the chest, well inside his body, so the spread cannot take the shot past him.
+
+bool:PlaceInLine()
+{
+	new Float:center[3]
+	pev(g_P[1], pev_origin, center)
+	if (PlaceInLineAt(center))
+		return true
+	for (new c = 0; c < sizeof(g_LineSpots); c++)
+	{
+		new spot = -1
+		while ((spot = engfunc(EngFunc_FindEntityByString, spot, "classname", g_LineSpots[c])) > 0)
+		{
+			pev(spot, pev_origin, center)
+			center[2] += 1.0
+			if (PlaceInLineAt(center))
+				return true
+		}
+	}
+	return false
+}
+
+bool:PlaceInLineAt(const Float:center[3])
+{
+	new a = g_P[0], b = g_P[1], c = g_P[2]
+	new Float:shooter[3], Float:back[3], Float:eye[3], Float:end[3], Float:ofs[3]
+	pev(a, pev_view_ofs, ofs)
+	new tr = create_tr2(), bool:found = false
+	engfunc(EngFunc_TraceHull, center, center, DONT_IGNORE_MONSTERS, HULL_HUMAN, b, tr)
+	if (get_tr2(tr, TR_StartSolid) || get_tr2(tr, TR_AllSolid))
+	{
+		free_tr2(tr)
+		return false
+	}
+	for (new i = 0; i < 8 && !found; i++)
+	{
+		new Float:dx = floatcos(float(i) * 45.0, degrees), Float:dy = floatsin(float(i) * 45.0, degrees)
+		shooter[0] = center[0] - dx * 300.0
+		shooter[1] = center[1] - dy * 300.0
+		shooter[2] = center[2]
+		back[0] = center[0] + dx * 96.0
+		back[1] = center[1] + dy * 96.0
+		back[2] = center[2]
+		engfunc(EngFunc_TraceHull, shooter, shooter, DONT_IGNORE_MONSTERS, HULL_HUMAN, a, tr)
+		if (get_tr2(tr, TR_StartSolid) || get_tr2(tr, TR_AllSolid))
+			continue
+		engfunc(EngFunc_TraceHull, back, back, DONT_IGNORE_MONSTERS, HULL_HUMAN, c, tr)
+		if (get_tr2(tr, TR_StartSolid) || get_tr2(tr, TR_AllSolid))
+			continue
+		// the floor under both, not more than 4 units down
+		end = shooter
+		end[2] -= 4.0
+		engfunc(EngFunc_TraceHull, shooter, end, IGNORE_MONSTERS, HULL_HUMAN, a, tr)
+		new Float:frac
+		get_tr2(tr, TR_flFraction, frac)
+		if (frac >= 1.0)
+			continue
+		end = back
+		end[2] -= 4.0
+		engfunc(EngFunc_TraceHull, back, end, IGNORE_MONSTERS, HULL_HUMAN, c, tr)
+		get_tr2(tr, TR_flFraction, frac)
+		if (frac >= 1.0)
+			continue
+		// a clear line from the shooter's eyes to the back player's middle, which passes the front
+		// player's chest
+		for (new k = 0; k < 3; k++)
+			eye[k] = shooter[k] + ofs[k]
+		engfunc(EngFunc_TraceLine, eye, back, IGNORE_MONSTERS, a, tr)
+		get_tr2(tr, TR_flFraction, frac)
+		if (frac < 1.0)
+			continue
+		engfunc(EngFunc_SetOrigin, a, shooter)
+		engfunc(EngFunc_SetOrigin, b, center)
+		engfunc(EngFunc_SetOrigin, c, back)
+		set_pev(a, pev_velocity, Float:{0.0, 0.0, 0.0})
+		set_pev(b, pev_velocity, Float:{0.0, 0.0, 0.0})
+		set_pev(c, pev_velocity, Float:{0.0, 0.0, 0.0})
+		bench_puppet_look_at(a, back)
+		found = true
+	}
+	free_tr2(tr)
+	return found
+}
+
+public pierce_place()
+{
+	ASSERT(is_user_alive(g_P[0]) && is_user_alive(g_P[1]) && is_user_alive(g_P[2]))
+	ASSERT(PlaceInLine())
+	bench_next("pierce_fire", 0.5)
+}
+
+public pierce_fire()
+{
+	for (new i = 0; i < 2; i++)
+	{
+		set_pev(g_P[1 + i], pev_health, 500.0)
+		g_Health[i] = 500.0
+		g_Hits[i] = 0
+		g_FirstHit[i] = 0.0
+	}
+	g_FireTime = 0.0
+	g_Pressing = 0
+	g_Watch = 1
+	bench_wait_until("pierce_one_shot", "pierce_shot", 5.0, g_P[0])
+}
+
+// Holds fire until the shot's event comes, then lets go the next frame: one shot.
+public bool:pierce_one_shot(id)
+{
+	if (g_FireTime > 0.0)
+	{
+		bench_puppet_input(id, 0)
+		return true
+	}
+	if (!g_Pressing)
+	{
+		g_Pressing = 1
+		bench_puppet_input(id, IN_ATTACK)
+	}
+	return false
+}
+
+public pierce_shot(id)
+{
+	bench_next("pierce_counted", 1.0)
+}
+
+public pierce_counted()
+{
+	g_Watch = 0
+	server_print("ts_gamerules: one flying Five-seveN shot: front player hit %d times (first %.3f s after), back player %d times (first %.3f s after)",
+		g_Hits[0], g_FirstHit[0] - g_FireTime, g_Hits[1], g_FirstHit[1] - g_FireTime)
+	ASSERT(g_FireTime > 0.0)
+	ASSERT(g_Hits[0] >= 1)
+	ASSERT(g_Hits[1] == 0 || g_FirstHit[1] > g_FirstHit[0])
+	ASSERT_EQ(g_Hits[0] + g_Hits[1], 2)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// A team list's name that comes twice keeps both places: with the teams "dup;dup;third" and the
+// models "seal|merc|gordon", a player of "third" (the second of the game's own two teams, joined
+// with "jointeam 2") wears the third team's model, gordon. The server is put in teamplay for the
+// test, with that list. The game runs game.cfg as it makes the rules, after the test has set the
+// list, so a game.cfg that sets the team list or models is put aside for the map change (as
+// tsgr_game.cfg) and back once the new map is up, or when this file loads next if the server
+// went down in between.
+
+#define GAMECFG "game.cfg"
+#define GAMECFG_SAVED "tsgr_game.cfg"
+
+RestoreGameCfg()
+{
+	if (file_exists(GAMECFG_SAVED))
+	{
+		delete_file(GAMECFG)
+		rename_file(GAMECFG_SAVED, GAMECFG, 1)
+	}
+}
+
+// Copies game.cfg aside and writes it back without its team list and team models lines; does
+// nothing when it has neither.
+new g_CfgLines[32][128]
+
+SetGameCfgAside()
+{
+	new f = fopen(GAMECFG, "rt")
+	if (!f)
+		return
+	new count = 0, found = 0
+	while (count < sizeof(g_CfgLines) && fgets(f, g_CfgLines[count], charsmax(g_CfgLines[])))
+	{
+		if (containi(g_CfgLines[count], "mp_teamlist") != -1 || containi(g_CfgLines[count], "mp_teammodels") != -1)
+			found = 1
+		count++
+	}
+	fclose(f)
+	if (!found)
+		return
+	rename_file(GAMECFG, GAMECFG_SAVED, 1)
+	f = fopen(GAMECFG, "wt")
+	for (new i = 0; i < count; i++)
+		if (containi(g_CfgLines[i], "mp_teamlist") == -1 && containi(g_CfgLines[i], "mp_teammodels") == -1)
+			fputs(f, g_CfgLines[i])
+	fclose(f)
+}
+
+public test_repeated_team_name_keeps_its_place()
+{
+	bench_set_timeout(120.0)
+	// the server's own settings, put back before the map goes back (plugin variables start over)
+	new v[256]
+	get_cvar_string("mp_teamlist", v, charsmax(v))
+	set_localinfo("tsgr_teamlist", v)
+	get_cvar_string("mp_teammodels", v, charsmax(v))
+	set_localinfo("tsgr_teammodels", v)
+	set_localinfo("tsgr_teamplay", get_cvar_num("mp_teamplay") ? "1" : "0")
+	g_Teamplay = 1
+	set_cvar_num("mp_teamplay", 1)
+	set_cvar_string("mp_teamlist", "dup;dup;third")
+	set_cvar_string("mp_teammodels", "seal|merc|gordon")
+	SetGameCfgAside()
+	bench_change_map(g_Map, "dup_map")
+}
+
+public dup_map()
+{
+	g_Teamplay = 1
+	RestoreGameCfg()
+	g_P[0] = bench_puppet("thirdteam")
+	ASSERT(g_P[0] > 0)
+	bench_puppet_spawn(g_P[0], "dup_spawned", 20.0, "respawn")
+}
+
+public dup_spawned(id)
+{
+	bench_puppet_cmd(id, "jointeam 2")
+	bench_next("dup_joined", 0.5, id)
+}
+
+public dup_joined(id)
+{
+	bench_puppet_spawn(id, "dup_respawned", 20.0, "respawn")
+}
+
+public dup_respawned(id)
+{
+	new team[32], model[32]
+	get_user_team(id, team, charsmax(team))
+	get_user_info(id, "model", model, charsmax(model))
+	server_print("ts_gamerules: team %s, model %s", team, model)
+	// 1: in "third"; 2: wearing gordon
+	new result = (equal(team, "third") ? 1 : 0) | (equal(model, "gordon") ? 2 : 0)
+	RestoreTeamCvars()
+	bench_change_map(g_Map, "dup_restored", result)
+}
+
+RestoreTeamCvars()
+{
+	new v[256]
+	get_localinfo("tsgr_teamplay", v, charsmax(v))
+	if (!v[0])
+		return
+	set_localinfo("tsgr_teamplay", "")
+	set_cvar_num("mp_teamplay", str_to_num(v))
+	get_localinfo("tsgr_teamlist", v, charsmax(v))
+	set_cvar_string("mp_teamlist", v)
+	get_localinfo("tsgr_teammodels", v, charsmax(v))
+	set_cvar_string("mp_teammodels", v)
+	g_Teamplay = 0
+}
+
+public dup_restored(result)
+{
+	ASSERT(result & 1)
+	ASSERT(result & 2)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Any player votes, a spectator too, and "vote map" takes the first word after "map": a spectator's
+// "vote map crossfire now" is a vote for crossfire. "vote stats" then lists the last count, each map
+// with its votes and the votes needed: four players need two, so after the next count (every ten
+// seconds) the voter is told "(1/2) votes for crossfire".
+
+public test_spectator_votes_and_stats_list_the_count()
+{
+	bench_set_timeout(60.0)
+	for (new i = 0; i < 4; i++)
+	{
+		new name[16]
+		formatex(name, charsmax(name), "watcher%d", i)
+		g_P[i] = bench_puppet(name)
+		ASSERT(g_P[i] > 0)
+	}
+	bench_next("watchers_in", 1.0)
+}
+
+public watchers_in()
+{
+	ASSERT_FALSE(is_user_alive(g_P[0]))
+	bench_puppet_say(g_P[0], "vote map crossfire now")
+	bench_next("watcher_voted", 0.5)
+}
+
+public watcher_voted()
+{
+	ASSERT_MSG(g_P[1], "", "vote for map crossfire")
+	// a count comes within ten seconds
+	bench_next("watcher_counted", 11.0)
+}
+
+public watcher_counted()
+{
+	bench_puppet_say(g_P[0], "vote stats")
+	bench_next("watcher_stats", 0.5)
+}
+
+public watcher_stats()
+{
+	new BenchMsg:msg = bench_msg_last(g_P[0], "TextMsg", "votes for")
+	new text[96]
+	if (msg != BenchMsg:0)
+		bench_msg_text(msg, text, charsmax(text))
+	server_print("ts_gamerules: vote stats: %s", text)
+	ASSERT(contain(text, "(1/2) votes for crossfire") != -1)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// A ts_mapglobals has no think: it is due to think ten seconds after it spawns, and then never
+// again (its next think time stays 0).
+
+public test_mapglobals_thinks_once()
+{
+	bench_set_timeout(60.0)
+	new ent = CreateMapGlobals(0)
+	ASSERT(ent > 0)
+	new Float:next
+	pev(ent, pev_nextthink, next)
+	server_print("ts_gamerules: ts_mapglobals due to think %.1f s after it spawned", next - get_gametime())
+	ASSERT(next > get_gametime() + 9.0)
+	bench_next("mapglobals_later", 11.0, ent)
+}
+
+public mapglobals_later(ent)
+{
+	new Float:next
+	pev(ent, pev_nextthink, next)
+	server_print("ts_gamerules: ts_mapglobals next think %.1f", next)
+	engfunc(EngFunc_RemoveEntity, ent)
+	ASSERT(next == 0.0)
 	bench_pass()
 }

@@ -9,16 +9,19 @@
 
 //
 // Tests for the original The Specialists 3.0's spectators: a joiner chases a player (observer mode
-// 2) and keeps that mode after dying, a joiner in last man standing is told the round clock, and a
-// spectator's pose (TSState) is not refreshed. The observer controls: jump cycles the mode, forward
+// 2) and keeps that mode after dying, and a spectator's pose (TSState) is not refreshed. The observer controls: jump cycles the mode, forward
 // watches the next player, a dead target is replaced, and with nobody to watch the spectator roams
 // without a message. The spectate block clears the impulse, a spectator back from play watches his
 // old target again, and a team change does not reset the controls' clock. A player leaving spectate
-// is announced (Spectator idx 0) only if he was watching (iuser1 or iuser2 set).
-// ../ts_observer.test.sma is the same on reTS.
+// is announced (Spectator idx 0) only if he was watching (iuser1 or iuser2 set), and the "respawn"
+// command takes only a player in a spectator mode (iuser1 set). Spectating does not hide the HUD.
+// ../ts_observer.test.sma is the same on reTS, where it also tests that a joiner in last man
+// standing is told the round clock: that test does not run here (NO_FFA_LMS), as each free-for-all
+// last man standing round start on TS 3.0 corrupts the server's heap (see LMS_TEST below).
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
+#define NO_FFA_LMS
 
 #include <amxmodx>
 #include <fakemeta>
@@ -27,6 +30,18 @@
 #define OBS_CHASE_LOCKED	1
 #define OBS_CHASE_FREE	2
 #define OBS_ROAMING	3
+
+// A test that plays a free-for-all last man standing round. On The Specialists 3.0 each such round's
+// start corrupts the server's heap: RestartRound hands the rules object, in deathmatch a 12-byte
+// CHalfLifeMultiplay, to CHalfLifeTeamplay::RecountTeams, which reads a team list past its end and
+// writes 0 to the word 532 bytes on (ts_i386.so @0x67d40, RecountTeams @0xd6177 in ts_i686.so). The
+// ts30 copy defines NO_FFA_LMS so these are not tests there (HLDS once died of it, at a later map
+// change, in AMX Mod X's language manager).
+#if defined NO_FFA_LMS
+#define LMS_TEST(%1) public unrun_%1()
+#else
+#define LMS_TEST(%1) public test_%1()
+#endif
 
 new g_Map[32]
 new g_Helper
@@ -43,6 +58,7 @@ public plugin_init()
 	get_mapname(g_Map, charsmax(g_Map))
 	register_forward(FM_PlayerPostThink, "on_post_think")
 	register_message(get_user_msgid("Spectator"), "on_spectator")
+	register_message(get_user_msgid("HideWeapon"), "on_hide_weapon")
 }
 
 new g_Leaver
@@ -145,7 +161,7 @@ public bench_teardown()
 	}
 }
 
-public test_lms_joiner_gets_the_round_clock()
+LMS_TEST(lms_joiner_gets_the_round_clock)
 {
 	bench_set_timeout(120.0)
 	g_Lms = 1
@@ -547,8 +563,8 @@ public clock_restored(mode)
 
 // ---------------------------------------------------------------------------------------------
 // Leaving spectate ("respawn" once the respawn wait is over), a spectator is announced to everyone
-// (Spectator idx, 0). One whose iuser1 and iuser2 have been cleared is not: on TS 3.0 the command
-// needs iuser1 and leaves him in spectate, on reTS StopObserver lets him in without announcing him.
+// (Spectator idx, 0). One whose iuser1 and iuser2 have been cleared is not, as the command takes
+// only a player with iuser1 set: he stays out of play.
 
 public test_unwatching_spectator_is_not_announced()
 {
@@ -607,5 +623,51 @@ public unannounced_done(id)
 		g_Announced)
 	g_Leaver = 0
 	ASSERT_EQ(g_Announced, 0)
+	ASSERT_FALSE(is_user_alive(id))
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Spectating does not hide the HUD: a joiner, who spectates until he plays, is never sent a
+// HideWeapon hiding the health (8) or the weapons (1). Every HideWeapon he gets is printed.
+
+new g_Hider
+new g_Hides
+new g_HideBits
+
+public on_hide_weapon(msgid, dest, ent)
+{
+	if (g_Hider && ent == g_Hider)
+	{
+		new bits = get_msg_arg_int(1)
+		server_print("ts_observer: %.3f HideWeapon %d to the joiner", get_gametime(), bits)
+		g_Hides++
+		g_HideBits |= bits
+	}
+	return PLUGIN_CONTINUE
+}
+
+public test_spectating_does_not_hide_the_hud()
+{
+	g_Hides = 0
+	g_HideBits = 0
+	g_Hider = 0
+	new id = bench_puppet("hudwatcher")
+	ASSERT(id > 0)
+	g_Hider = id
+	bench_wait_until("spectating", "hud_spectating", 5.0, id)
+}
+
+public hud_spectating(id)
+{
+	bench_next("hud_counted", 2.0, id)
+}
+
+public hud_counted(id)
+{
+	server_print("ts_observer: %d HideWeapon to the spectating joiner, bits %d", g_Hides, g_HideBits)
+	g_Hider = 0
+	ASSERT(pev(id, pev_iuser1) != 0)
+	ASSERT_EQ(g_HideBits & 9, 0)
 	bench_pass()
 }
