@@ -19,10 +19,10 @@
 //   gun and a blade). The tests use it for hit places, headshots and team attacks.
 // - The TSHealth message the game sends after a player is hurt, read with the victim's dmg_take
 //   and dmg_inflictor. Grenades, the kill flags (stunt, sliding, double, specialist) and frag
-//   counts only come this way. reTS sends TSHealth after it has already cleared dmg_take (stock
-//   TS 3.0 sends it before), so TSX never sees a real hit. The "real damage" tests here hurt the
-//   victim with Ham_TakeDamage and put dmg_take and dmg_inflictor back from a TSHealth message
-//   hook just before TSX reads them, which is what stock TS hands TSX.
+//   counts only come this way. The "real damage" tests here hurt the victim with Ham_TakeDamage and
+//   set dmg_take and dmg_inflictor (and, for the kill flags, the killer's stunt state and frags)
+//   from a TSHealth message hook just before TSX reads them, so each hit reaches TSX as the test
+//   chose it.
 //
 
 #include <amxmodx>

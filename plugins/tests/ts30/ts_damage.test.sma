@@ -368,7 +368,8 @@ public slow_restored()
 // ---------------------------------------------------------------------------------------------
 // A thrown knife that hits a player: TSX credits its thrower, with the throwing knife's weapon id.
 
-// The game may send TSHealth after it has cleared the hit (reTS does); this puts back what TSX reads.
+// The touch is forced, so the game's trace is not this hit; reTS then does the target no damage
+// (TS 3.0 does), so this puts back the hit TSX reads.
 public Shim_TSHealth(msgid, dest, id)
 {
 	if (!g_Knife || id != g_P[1] || !pev_valid(g_Knife))
@@ -443,6 +444,6 @@ public bool:hit_counted(id)
 public hit_check(id)
 {
 	ASSERT_EQ(g_HitAttacker, g_P[0])
-	ASSERT_EQ(g_HitWeapon, 37)
+	ASSERT_EQ(g_HitWeapon, TSW_TKNIFE)
 	bench_pass()
 }
