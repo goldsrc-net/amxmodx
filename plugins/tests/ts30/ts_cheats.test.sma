@@ -23,6 +23,7 @@
 #include <amxxbench>
 
 new g_Map[32]
+new g_Cash
 
 public plugin_init()
 {
@@ -37,6 +38,38 @@ LastHeld(id)
 	if (msg == BenchMsg:0)
 		return -1
 	return bench_msg_int(msg, 0)
+}
+
+public bench_teardown()
+{
+	set_cvar_num("sv_cheats", 0)
+}
+
+// sv_cheats turned on after the map started does not count: the game read it when the map started.
+public test_cheats_are_read_at_map_start()
+{
+	ASSERT_EQ(get_cvar_num("sv_cheats"), 0)
+	new id = bench_puppet("latecheat")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "latecheat_spawned", 20.0, "respawn")
+}
+
+public latecheat_spawned(id)
+{
+	set_cvar_num("sv_cheats", 1)
+	g_Cash = ts_getusercash(id)
+	bench_puppet_cmd(id, "powerup 5")
+	bench_puppet_cmd(id, "cashala")
+	bench_next("latecheat_after", 0.5, id)
+}
+
+public latecheat_after(id)
+{
+	ASSERT(LastHeld(id) != TSPWUP_DFIRERATE)
+	ASSERT_EQ(ts_getusercash(id), g_Cash)
+	// With cheats off, cashala is not a command at all.
+	ASSERT_MSG(id, "TextMsg", "Unknown command: cashala")
+	bench_pass()
 }
 
 public test_powerup_needs_cheats()
