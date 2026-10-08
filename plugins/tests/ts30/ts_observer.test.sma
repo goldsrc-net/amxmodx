@@ -13,7 +13,8 @@
 // spectator's pose (TSState) is not refreshed. The observer controls: jump cycles the mode, forward
 // watches the next player, a dead target is replaced, and with nobody to watch the spectator roams
 // without a message. The spectate block clears the impulse, a spectator back from play watches his
-// old target again, and a team change does not reset the controls' clock.
+// old target again, and a team change does not reset the controls' clock. A player leaving spectate
+// is announced (Spectator idx 0) only if he was watching (iuser1 or iuser2 set).
 // ../ts_observer.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -41,6 +42,20 @@ public plugin_init()
 	register_plugin("TS Observer Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	get_mapname(g_Map, charsmax(g_Map))
 	register_forward(FM_PlayerPostThink, "on_post_think")
+	register_message(get_user_msgid("Spectator"), "on_spectator")
+}
+
+new g_Leaver
+new g_Announced
+new Float:g_Until
+
+// Spectator (idx, 0) to everyone for g_Leaver: he is announced out of spectate.
+public on_spectator(msgid, dest, ent)
+{
+	if (g_Leaver && (dest == MSG_ALL || dest == MSG_BROADCAST) && get_msg_arg_int(1) == g_Leaver
+		&& get_msg_arg_int(2) == 0)
+		g_Announced++
+	return PLUGIN_CONTINUE
 }
 
 public bool:is_dead(id)
@@ -527,5 +542,70 @@ public clock_restored(mode)
 {
 	server_print("ts_observer: mode after the second jump %d", mode)
 	ASSERT_EQ(mode, OBS_CHASE_FREE)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Leaving spectate ("respawn" once the respawn wait is over), a spectator is announced to everyone
+// (Spectator idx, 0). One whose iuser1 and iuser2 have been cleared is not: on TS 3.0 the command
+// needs iuser1 and leaves him in spectate, on reTS StopObserver lets him in without announcing him.
+
+public test_unwatching_spectator_is_not_announced()
+{
+	bench_set_timeout(60.0)
+	g_Leaver = bench_puppet("announced")
+	ASSERT(g_Leaver > 0)
+	g_Announced = 0
+	bench_wait_until("spectating", "announced_spectating", 5.0, g_Leaver)
+}
+
+public announced_spectating(id)
+{
+	g_Until = get_gametime() + 15.0
+	bench_wait_until("announced_back", "announced_in", 20.0, id)
+}
+
+// "respawn" every frame until he is in play, or 15 s pass
+public bool:announced_back(id)
+{
+	if (is_user_alive(id) || get_gametime() > g_Until)
+		return true
+	engclient_cmd(id, "respawn")
+	return false
+}
+
+public announced_in(id)
+{
+	ASSERT(is_user_alive(id))
+	ASSERT(g_Announced > 0)
+	g_Leaver = bench_puppet("unannounced")
+	ASSERT(g_Leaver > 0)
+	g_Announced = 0
+	bench_wait_until("spectating", "unannounced_spectating", 5.0, g_Leaver)
+}
+
+public unannounced_spectating(id)
+{
+	g_Until = get_gametime() + 15.0
+	bench_wait_until("unannounced_back", "unannounced_done", 20.0, id)
+}
+
+// the same with iuser1 and iuser2 cleared just before each "respawn"
+public bool:unannounced_back(id)
+{
+	if (is_user_alive(id) || get_gametime() > g_Until)
+		return true
+	set_pev(id, pev_iuser1, 0)
+	set_pev(id, pev_iuser2, 0)
+	engclient_cmd(id, "respawn")
+	return false
+}
+
+public unannounced_done(id)
+{
+	server_print("ts_observer: unwatching spectator alive %d, announced %d times", is_user_alive(id),
+		g_Announced)
+	g_Leaver = 0
+	ASSERT_EQ(g_Announced, 0)
 	bench_pass()
 }

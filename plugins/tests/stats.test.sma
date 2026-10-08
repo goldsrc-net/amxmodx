@@ -782,7 +782,8 @@ public nade_spawned()
 	set_pev(g_Grenade, pev_classname, "grenade")
 	set_pev(g_Grenade, pev_owner, g_P[0])
 	RealDamage(g_P[1], g_Grenade, g_P[0], 500.0)
-	bench_next("nade_killed", 0.1)
+	// the death reaches TSX with the victim's next client update, at most 0.1 s later
+	bench_next("nade_killed", 0.2)
 }
 
 public nade_killed()
@@ -795,7 +796,7 @@ public nade_killed()
 
 	// Now the thrower on himself.
 	RealDamage(g_P[0], g_Grenade, g_P[0], 500.0)
-	bench_next("nade_suicide", 0.1)
+	bench_next("nade_suicide", 0.2)
 }
 
 public nade_suicide()
@@ -840,7 +841,10 @@ public kf_spawned()
 	bench_next("kf_next", 0.0)
 }
 
-// One kill a frame, so all but the first of a round are double kills (within a second).
+// One kill every 0.15 s, so all but the first of a round are double kills (within a second). TSX
+// counts a kill from the victim's TSHealth, which the game sends with his next client update, at
+// most 0.1 s after the death (UpdateClientData runs every 0.1 s); a second kill before then makes
+// TSX miss one (the attacker's frags already counted).
 public kf_next()
 {
 	new k = g_P[0], victim = 0
@@ -861,11 +865,11 @@ public kf_next()
 	else
 		RealDamage(victim, k, k, 500.0)
 	if (g_Kill == 3)
-		bench_next("kf_flags", 0.1)
+		bench_next("kf_flags", 0.2)
 	else if (g_Kill == 10)
-		bench_next("kf_specialist", 0.1)
+		bench_next("kf_specialist", 0.2)
 	else
-		bench_next("kf_next", 0.0)
+		bench_next("kf_next", 0.15)
 }
 
 public enemies_alive()
@@ -913,7 +917,7 @@ public kf_specialist()
 	}
 	g_P[1] = killer
 	RealDamage(k, killer, killer, 500.0)
-	bench_next("kf_killed_specialist", 0.1)
+	bench_next("kf_killed_specialist", 0.2)
 }
 
 public kf_killed_specialist()

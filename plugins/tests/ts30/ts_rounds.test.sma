@@ -14,8 +14,8 @@
 // watches nobody (teammates only, and last man standing has none), a new round sends everyone to
 // spectate with the value of his loadout as cash, a player who leaves counts as one gone, a later
 // death moves the count back, and the restartround command restarts the round under a black
-// banner. In plain teamplay a wiped team does not end a round. ../ts_rounds.test.sma is the same
-// on reTS.
+// banner. In plain teamplay a wiped team does not end a round. A ts_mapglobals with spawnflag 32
+// turns the round clock off. ../ts_rounds.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -709,7 +709,8 @@ public banner_restored(result)
 }
 
 // InitHUD tells a joiner the round clock, and so does each pass of UpdateClientData's HUD reset:
-// that one in the same frame, and again on the pass his move to spectate asks for.
+// that one in the same frame, and again on the pass his move to spectate asks for, which comes
+// 0.1 s later as UpdateClientData runs at most every 0.1 s.
 public test_joiner_is_told_the_clock_three_times()
 {
 	StartLms("thrice_map")
@@ -734,11 +735,13 @@ public thrice_joined()
 {
 	for (new i = 0; i < g_ClockCount; i++)
 		server_print("ts_rounds: joiner clock %d at %.3f", i, g_ClockTimes[i])
-	// count, and bit 8 when the first two came in one frame (the third comes on the next
-	// UpdateClientData, which TS 3.0 runs 0.1 s later and reTS in the same frame)
+	// count, bit 8 when the first two came in one frame, bit 9 when the third came at least
+	// 0.05 s after them (on the next UpdateClientData, 0.1 s later)
 	new result = g_ClockCount
 	if (g_ClockCount >= 3 && g_ClockTimes[0] == g_ClockTimes[1] && g_ClockTimes[2] >= g_ClockTimes[1])
 		result |= 256
+	if (g_ClockCount >= 3 && g_ClockTimes[2] >= g_ClockTimes[1] + 0.05)
+		result |= 512
 	g_Watched = 0
 	EndLms("thrice_restored", result)
 }
@@ -749,5 +752,52 @@ public thrice_restored(result)
 	server_print("ts_rounds: joiner clock result %d", result)
 	ASSERT_EQ(result & 255, 3)
 	ASSERT(result & 256)
+	ASSERT(result & 512)
+	bench_pass()
+}
+
+// A ts_mapglobals with spawnflag 32 turns the round clock off: in last man standing nobody is told
+// the round's start (RoundTime to everyone) and a joiner is not caught up on it.
+public test_mapglobals_turns_the_round_clock_off()
+{
+	StartLms("clockoff_map")
+}
+
+public clockoff_map()
+{
+	new ent = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "ts_mapglobals"))
+	ASSERT(ent > 0)
+	set_pev(ent, pev_spawnflags, 32)
+	dllfunc(DLLFunc_Spawn, ent)
+	g_RoundStart = 0.0
+	g_A = bench_puppet("clockofffirst")
+	ASSERT(g_A > 0)
+	// the first round starts five seconds into the map
+	bench_next("clockoff_join", 7.0)
+}
+
+public clockoff_join()
+{
+	g_ClockCount = 0
+	g_Watched = bench_puppet("clockoffjoiner")
+	ASSERT(g_Watched > 0)
+	bench_next("clockoff_joined", 1.0)
+}
+
+public clockoff_joined()
+{
+	// joiner's clocks, and bit 8 when the round start was told to everyone
+	new result = g_ClockCount
+	if (g_RoundStart > 0.0)
+		result |= 256
+	g_Watched = 0
+	EndLms("clockoff_restored", result)
+}
+
+public clockoff_restored(result)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	server_print("ts_rounds: clock off result %d", result)
+	ASSERT_EQ(result, 0)
 	bench_pass()
 }
