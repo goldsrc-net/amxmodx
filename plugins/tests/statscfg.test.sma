@@ -461,14 +461,16 @@ public test_menu_toggles_and_saves()
 
 // write_file only returns 0 after raising an error, and the error stops the command: neither
 // message comes (statscfg.sma 95, 237 and 262 cannot run). The bench matches the error's
-// description, which names the native; its message is on the server console.
+// description, which names the native whether or not statscfg.amxx runs in debug mode
+// (debugger.cpp: "... (native "write_file") (plugin ...)" with a trace, "... (plugin ...)
+// (native "write_file") - debug not enabled!" without); its message is on the server console.
 public test_save_into_a_folder()
 {
 	if (!StartAdmin("badsaver"))
 		return
 	ASSERT(mkdir(g_StatsFile) == 0)
-	bench_expect_error("(native ^"write_file^") (plugin ^"statscfg.amxx^")")
-	bench_expect_error("(native ^"write_file^") (plugin ^"statscfg.amxx^")")
+	bench_expect_error("(native ^"write_file^")")
+	bench_expect_error("(native ^"write_file^")")
 	Cfg("save")
 	ASSERT_MSG(0, "server", "Couldn't write file")
 	ASSERT_EQ(bench_msg_count(g_Puppet, "TextMsg", "Stats configuration saved"), 0)
