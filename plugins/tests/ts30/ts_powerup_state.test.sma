@@ -10,7 +10,8 @@
 //
 // Tests for what the original The Specialists 3.0 does with a player's powerup each frame: a dead
 // player's powerup goes back into the world where he lies, so does a spectator's, and a running
-// superjump powerup lowers his gravity; whatever lowers it, landing puts it back.
+// superjump powerup lowers his gravity; whatever lowers it, landing puts it back. A map with
+// powerups of its own gets no random ones.
 // ../ts_powerup_state.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -32,6 +33,19 @@ public plugin_init()
 {
 	register_plugin("TS Powerup State Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	register_forward(FM_PlayerPreThink, "on_prethink", 1)
+	register_forward(FM_CreateEntity, "on_create", 1)
+}
+
+// The random powerups test notes every entity made while it watches.
+new bool:g_Watch
+new g_Made[256]
+new g_MadeCount
+
+public on_create()
+{
+	if (g_Watch && g_MadeCount < sizeof(g_Made))
+		g_Made[g_MadeCount++] = get_orig_retval()
+	return FMRES_IGNORED
 }
 
 public on_prethink(id)
@@ -268,5 +282,36 @@ public lander_landed(id)
 	new Float:gravity
 	pev(id, pev_gravity, gravity)
 	ASSERT_NEAR(gravity, 1.0)
+	bench_pass()
+}
+
+// A map with powerups of its own (ts_lobby) gets no random ones: the first ts_powerup to spawn on
+// a map turns them off (CTSPowerUp::Spawn, rules+1), so in 22 s, more than the 20 s between two
+// random ones, the game makes none.
+public test_map_powerups_leave_out_random_ones()
+{
+	bench_set_timeout(40.0)
+	ASSERT(engfunc(EngFunc_FindEntityByString, -1, "classname", "ts_powerup") > 0)
+	g_MadeCount = 0
+	g_Watch = true
+	bench_next("random_watched", 22.0, 0)
+}
+
+public random_watched(id)
+{
+	g_Watch = false
+	new classname[32]
+	for (new i = 0; i < g_MadeCount; i++)
+	{
+		if (!pev_valid(g_Made[i]))
+			continue
+		pev(g_Made[i], pev_classname, classname, charsmax(classname))
+		if (equal(classname, "ts_powerup"))
+		{
+			bench_fail("the game made powerup %d", g_Made[i])
+			return
+		}
+	}
+	server_print("ts_powerup_state: %d entities made in 22 s, no powerup", g_MadeCount)
 	bench_pass()
 }

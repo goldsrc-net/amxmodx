@@ -108,12 +108,13 @@ Float:MaxSpeed(id)
 	return speed
 }
 
-// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up.
+// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up, truncated. (Floored: the
+// amd64 AMX Mod X core's floatround_tozero rounds 239.63 up to 240.)
 SpeedBySlots(slots)
 {
 	if (slots > 80)
 		return 330
-	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_tozero)
+	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_floor)
 }
 
 // A powerup made the way ts_createpwup makes one, through fakemeta.
@@ -221,6 +222,34 @@ public loader_settled(id)
 	// And back.
 	ts_setuserslots(id, slots)
 	ASSERT_EQ(floatround(MaxSpeed(id)), speed)
+	bench_pass()
+}
+
+// A pickup sets the speed for what he then carries, truncated to a whole number: a Desert Eagle
+// leaves 66 free slots, 307.8 by the formula, so 307 (GetSpeedBySlots, the fistp chopping).
+#define DESERT_EAGLE	12
+
+public test_pickup_speed_is_truncated()
+{
+	new id = bench_puppet("deagle")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "deagle_spawned", 20.0, "respawn")
+}
+
+public deagle_spawned(id)
+{
+	ts_giveweapon(id, DESERT_EAGLE, 0, 0)
+	bench_next("deagle_carried", 0.5, id)
+}
+
+public deagle_carried(id)
+{
+	new slots = ts_getuserslots(id)
+	server_print("tsx_player: %d free slots, maxspeed %.3f", slots, MaxSpeed(id))
+	// a load whose speed has a fraction of a half or more, so rounding would show
+	ASSERT(slots <= 80)
+	ASSERT(float(slots) * 120.0 / 81.0 - float(floatround(float(slots) * 120.0 / 81.0, floatround_floor)) >= 0.5)
+	ASSERT(MaxSpeed(id) == float(SpeedBySlots(slots)))
 	bench_pass()
 }
 

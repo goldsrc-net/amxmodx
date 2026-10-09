@@ -69,12 +69,13 @@ Float:MaxSpeed(id)
 	return speed
 }
 
-// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up.
+// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up, truncated. (Floored: the
+// amd64 AMX Mod X core's floatround_tozero rounds 239.63 up to 240.)
 SpeedBySlots(slots)
 {
 	if (slots > 80)
 		return 330
-	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_tozero)
+	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_floor)
 }
 
 // The reserve in the last WeaponInfo the game sent the player about weapon, or -1.

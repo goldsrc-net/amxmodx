@@ -11,12 +11,13 @@
 // Tests for when The Specialists 3.0 sends its HUD messages. CTSGun::UpdateClientData
 // (0x758c8) runs at most every 0.1 s; it sends WeaponInfo when the weapon's type or its caliber's
 // reserve changes, not for its clip, fire mode or attachments (the client keeps those), and a
-// WStatus per weapon slot when the player comes to own it or stops, so a newcomer is sent one only
-// for what he holds. TSArmor carries the armor truncated, and goes out while the armor differs from
-// that whole number (0x82057). From a death until the player spectates no CurWeapon goes out with
-// the stock SDK's dead marker (the original sends CurWeapon only from RemoveAllItems and
-// CBasePlayerWeapon::UpdateClientData), and the death clears the player's field of view (pev->fov,
-// 0x7f48d).
+// WStatus per weapon slot when the player comes to own it or stops, so a newcomer with nothing but
+// kung fu, whose slot is never owned, is sent none. TSArmor carries the armor truncated, and goes out while the armor differs from
+// that whole number (0x82057). From a death until the player spectates two CurWeapon 0 0 0 go out,
+// both from RemoveAllItems (PlayerDeathThink strips the dead player, 0x7ec15, then StartObserver),
+// none with the stock SDK's dead marker, and the death clears the player's field of view (pev->fov,
+// 0x7f48d). ActItems comes from the player's own update (0x823c7), with the akimbo tag 0x40 that
+// CTSGun::GetActiveItems adds.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -184,7 +185,7 @@ public throttle_done(id)
 
 // --- WStatus ---------------------------------------------------------------------------------
 
-// A newcomer with nothing yet but his hands is sent a WStatus only for what he owns.
+// A newcomer with nothing yet but his hands is sent no WStatus: kung fu's slot is not owned.
 public test_newcomer_wstatus_only_for_what_he_holds()
 {
 	g_P = bench_puppet("newcomer")
@@ -211,7 +212,7 @@ public newcomer_settled(id)
 		}
 	}
 	server_print("ts_messages: the newcomer's WStatus messages: %d", count)
-	ASSERT(count <= 1)
+	ASSERT_EQ(count, 0)
 	bench_pass()
 }
 
@@ -262,9 +263,9 @@ public armor_quiet(id)
 
 // --- the death -------------------------------------------------------------------------------
 
-// From his death until he spectates, the player is sent no CurWeapon with the stock SDK's dead
-// marker (0, 255, 255), which the stock StartObserver sends (the original's sends only what its
-// RemoveAllItems does, 0 0 0), and the death clears his field of view.
+// From his death until he spectates, the player is sent two CurWeapon 0 0 0, from the strip in
+// PlayerDeathThink and from StartObserver's, and none with the stock SDK's dead marker (0, 255,
+// 255); the death clears his field of view.
 public test_death_to_spectating()
 {
 	bench_set_timeout(30.0)
@@ -304,8 +305,60 @@ public death_observing(id)
 	{
 		count++
 		server_print("ts_messages: CurWeapon %d %d %d", bench_msg_int(m, 0), bench_msg_int(m, 1), bench_msg_int(m, 2))
-		ASSERT(bench_msg_int(m, 1) != 255)
+		ASSERT_EQ(bench_msg_int(m, 0), 0)
+		ASSERT_EQ(bench_msg_int(m, 1), 0)
+		ASSERT_EQ(bench_msg_int(m, 2), 0)
 	}
 	server_print("ts_messages: CurWeapon messages from the death to spectating: %d", count)
+	ASSERT_EQ(count, 2)
+	bench_pass()
+}
+
+// --- ActItems --------------------------------------------------------------------------------
+
+#define BERETTA	2
+
+// A second Beretta makes Akimbo Berettas. Everyone is told the player's active items: 0 while he
+// joins (StartObserver; once more on a TS 3.0 teamplay server), then, with the pair out, the akimbo
+// tag 0x40 alone (no attachment on), once, from his own update, which sends nothing while they stay
+// the same.
+public test_actitems_tags_akimbo()
+{
+	g_P = bench_puppet("twohands")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "twohands_spawned", 20.0, "respawn")
+}
+
+public twohands_spawned(id)
+{
+	ts_giveweapon(id, BERETTA, 30, 0)
+	bench_next("twohands_second", 1.0, id)
+}
+
+public twohands_second(id)
+{
+	ts_giveweapon(id, BERETTA, 30, 0)
+	bench_next("twohands_told", 2.0, id)
+}
+
+public twohands_told(id)
+{
+	new sent[8], count = 0, tagged = 0
+	for (new BenchMsg:m = bench_msg_next(id, BenchMsg:0, "ActItems"); m != BenchMsg:0; m = bench_msg_next(id, m, "ActItems"))
+	{
+		if (bench_msg_int(m, 0) != id)
+			continue
+		server_print("ts_messages: ActItems %d %d", id, bench_msg_int(m, 1))
+		if (count < sizeof(sent))
+			sent[count] = bench_msg_int(m, 1)
+		if (bench_msg_int(m, 1) == 0x40)
+			tagged++
+		count++
+	}
+	ASSERT(count >= 2 && count <= sizeof(sent))
+	ASSERT_EQ(tagged, 1)
+	ASSERT_EQ(sent[count - 1], 0x40)
+	for (new i = 0; i < count - 1; i++)
+		ASSERT_EQ(sent[i], 0)
 	bench_pass()
 }
