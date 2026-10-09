@@ -2381,6 +2381,38 @@ public hopper_spawned(id)
 	bench_pass()
 }
 
+// The original registers seven server commands, all in GameDLLInit: not halflife-updated's
+// sv_load_all_maps and sv_stop_loading_all_maps. The stop command is the harmless one to try. The
+// engine reports an unknown command only with sv_echo_unknown_cmd 1 (ReHLDS), and the bench sees
+// the engine's console lines on ReHLDS only, so an echo shows whether the answer can be seen.
+new g_EchoUnknown[8]
+
+public test_no_load_all_maps_commands()
+{
+	if (cvar_exists("sv_echo_unknown_cmd"))
+	{
+		get_cvar_string("sv_echo_unknown_cmd", g_EchoUnknown, charsmax(g_EchoUnknown))
+		set_cvar_string("sv_echo_unknown_cmd", "1")
+	}
+	server_cmd("echo tsgr_maps_probe")
+	server_cmd("sv_stop_loading_all_maps")
+	server_exec()
+	bench_next("maps_commands_answered", 0.1)
+}
+
+public maps_commands_answered()
+{
+	new unknown = bench_msg_count(0, "server", "unknown command ^"sv_stop_loading_all_maps^"")
+	new seen = bench_msg_count(0, "server", "tsgr_maps_probe")
+	new bool:echoes = bool:cvar_exists("sv_echo_unknown_cmd")
+	if (echoes)
+		set_cvar_string("sv_echo_unknown_cmd", g_EchoUnknown)
+	server_print("ts_gamerules: stop command unknown %d, echo seen %d, unknown commands echoed %d", unknown, seen, echoes)
+	if (seen && echoes)
+		ASSERT_EQ(unknown, 1)
+	bench_pass()
+}
+
 // CPushable::Move (0xb1c50): a player's touch pushes only while he walks forward or holds +use; a
 // pull (+use, its Use) moves the pushable by 0.3 of his velocity; either way he then moves at the
 // pushable's speed. A func_pushable is made from one of the map's brush models for each case and
