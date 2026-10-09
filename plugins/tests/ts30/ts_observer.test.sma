@@ -17,7 +17,8 @@
 // command takes only a player in a spectator mode (iuser1 set). Spectating does not hide the HUD,
 // nor any part of it. Leaving spectate keeps iuser3. A joiner in last man standing is told the
 // round clock. A player who went in during a round's re-entry window does not take it back to
-// spectate, and a zero view offset sets iuser4 bit 0x400000.
+// spectate, and a zero view offset sets iuser4 bit 0x400000. A window that runs out leaves the
+// respawn gate at -1.0.
 // ../ts_observer.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386) patched with amxxbench's tests/patch-ts30.py: on
@@ -32,6 +33,8 @@
 #define OBS_CHASE_LOCKED	1
 #define OBS_CHASE_FREE	2
 #define OBS_ROAMING	3
+// The respawn gate (+0x770), as a fakemeta pdata offset (no Linux difference), in ts_i386.so.
+#define PDATA_GATE	(0x770 / 4)
 
 new g_Map[32]
 new g_Helper
@@ -766,8 +769,9 @@ public slowspec_eased(id)
 
 // A round's re-entry window (RestartRound arms it 10 s out, the gate 3 s out) is a spectate-block
 // line once a second, its seconds truncated (0x81063): 6 down to 0 after the 3 s countdown. It runs
-// out inside the spectate block (0x80fb3) with "You have to wait until the next round."; a player
-// who went in to play in the window is not told that.
+// out inside the spectate block (0x80fb3) with "You have to wait until the next round." and the
+// waiter's respawn gate at -1.0, the wait-for-next-round mark (0x80fe9); a player who went in to
+// play in the window is not told that.
 new g_HoldWaiter
 new g_HoldPlayer
 new BenchMsg:g_HoldMark
@@ -846,21 +850,25 @@ public hold_done()
 			playerWaits++
 	}
 	new alive = is_user_alive(g_HoldPlayer) ? 1 : 0
-	server_print("ts_observer: window lines %d, %d down to %d, steps %d, waits %d (last %d); player alive %d, told to wait %d",
-		lines, first, last, steps, waits, waitLast, alive, playerWaits)
+	new Float:gate = get_pdata_float(g_HoldWaiter, PDATA_GATE, 0, 0)
+	server_print("ts_observer: window lines %d, %d down to %d, steps %d, waits %d (last %d); player alive %d, told to wait %d; waiter's gate %.1f",
+		lines, first, last, steps, waits, waitLast, alive, playerWaits, gate)
 	// Put the map back first, so a failure leaves the next tests on the usual rules. Plugins reload on
-	// the map change, so the outcome travels as the step's data.
-	new ok = lines == 7 && first == 6 && last == 0 && steps && waits == 1 && waitLast && alive == 1 && playerWaits == 0
+	// the map change, so the outcome travels as the step's data: bit 0 the lines, bit 1 the gate.
+	new ok = (lines == 7 && first == 6 && last == 0 && steps && waits == 1 && waitLast && alive == 1 && playerWaits == 0) ? 1 : 0
+	if (gate == -1.0)
+		ok |= 2
 	set_cvar_num("lastmanstanding", 0)
 	set_cvar_num("roundtime", g_RoundTime)
 	g_Lms = 0
-	bench_change_map(g_Map, "hold_restored", ok ? 1 : 0)
+	bench_change_map(g_Map, "hold_restored", ok)
 }
 
 public hold_restored(ok)
 {
 	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
-	ASSERT_EQ(ok, 1)
+	ASSERT(ok & 1)
+	ASSERT(ok & 2)
 	bench_pass()
 }
 

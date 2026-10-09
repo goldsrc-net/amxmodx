@@ -11,7 +11,8 @@
 // Tests for the original The Specialists 3.0's "powerup <n>" cheat: it works only when the map started
 // with sv_cheats 1, and its table is 1 slow pause, 2 a grenade, 3 kung fu and superjump together,
 // 4 more clips, 5 double fire rate, anything else slow motion. Impulse 100 turns on no flashlight,
-// impulse 204 works without cheats, and impulses 101 and 203 do nothing even with them.
+// impulse 204 works without cheats, and impulses 101 and 203 do nothing even with them. Impulses work
+// in the attack delay after a spawn.
 // ../ts_cheats.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -350,5 +351,42 @@ public impulses_restored(ok)
 {
 	ASSERT_EQ(get_cvar_num("sv_cheats"), 0)
 	ASSERT_EQ(ok, 1)
+	bench_pass()
+}
+
+// ImpulseCommands runs during the attack delay a spawn sets (TSInit: 1 s) while the player has no
+// weapon in hand (ItemPostFrame, 0xcc4ff): impulse 204 0.2 s after the spawn re-tells him his
+// spectator state at once.
+new BenchMsg:g_EarlyMark
+
+public test_impulse_in_the_spawn_attack_delay()
+{
+	new id = bench_puppet("earlyupdater")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "early_spawned", 20.0, "respawn")
+}
+
+public early_spawned(id)
+{
+	bench_next("early_ready", 0.2, id)
+}
+
+public early_ready(id)
+{
+	g_EarlyMark = bench_msg_last(id, "Spectator")
+	bench_puppet_input(id, 0, 0.0, 0.0, 0.0, 204)
+	bench_next("early_pressed", 0.3, id)
+}
+
+public early_pressed(id)
+{
+	bench_puppet_input(id, 0)
+	new count = 0
+	for (new BenchMsg:msg = bench_msg_next(id, g_EarlyMark, "Spectator"); msg != BenchMsg:0;
+		msg = bench_msg_next(id, msg, "Spectator"))
+		if (bench_msg_int(msg, 0) == id && bench_msg_int(msg, 1) == 0)
+			count++
+	server_print("ts_cheats: Spectator (self, 0) 0.3 s after impulse 204 at 0.2 s: %d", count)
+	ASSERT_EQ(count, 1)
 	bench_pass()
 }

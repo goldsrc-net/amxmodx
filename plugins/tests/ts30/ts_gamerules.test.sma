@@ -21,7 +21,8 @@
 // ts_mapglobals thinks once. Kevlar leaves the head; the range falloff index is truncated; with
 // every bullet slot in flight the game warns; in The One mode the team list's first name gives way
 // to "The ONE"; a ts_mapglobals keeps its saved fields through Spawn; a bullet in flight ends with
-// the map. A shot under water leaves a truncated count of bubbles.
+// the map. A shot under water leaves a truncated count of bubbles. There is no mp_flashlight, no sv_busters and no
+// flashlight sound, and a spawn zeroes the fields only it touches.
 // ../ts_gamerules.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -31,6 +32,13 @@
 // offsets (4-byte units, no Linux difference), in ts_i386.so.
 #define MAPGLOBALS_RESPAWN_NUM	25
 #define MAPGLOBALS_AT_A_TIME_NUM	26
+
+// The player fields only TSInit touches (+0x740, +0x77c, +0x184) and the chat clock (+0x7c0), as
+// fakemeta pdata offsets (no Linux difference), in ts_i386.so.
+#define PDATA_INIT740	(0x740 / 4)
+#define PDATA_INIT77C	(0x77c / 4)
+#define PDATA_INIT184	(0x184 / 4)
+#define PDATA_CHATTIME	(0x7c0 / 4)
 
 #include <amxmodx>
 #include <fakemeta>
@@ -575,7 +583,8 @@ public slot_voted()
 // ---------------------------------------------------------------------------------------------
 // In teamplay a player spawns at an info_player_team<N> of his team (N = the team's place in the
 // list) when the map has one. Two such spots are put 64 units over two deathmatch spots; a player
-// starts at one of them (the server is put in teamplay for the test if it is not).
+// starts at one of them (the server is put in teamplay for the test if it is not; game.cfg is put
+// aside without its teamplay line for the map change, as for the repeated team name test).
 
 public test_team_player_spawns_at_his_team_spot()
 {
@@ -587,6 +596,7 @@ public test_team_player_spawns_at_his_team_spot()
 	}
 	g_Teamplay = 1
 	set_cvar_num("mp_teamplay", 1)
+	SetGameCfgAside()
 	bench_change_map(g_Map, "spot_map", 1)
 }
 
@@ -594,6 +604,7 @@ public test_team_player_spawns_at_his_team_spot()
 public spot_map(changed)
 {
 	g_Teamplay = changed
+	ASSERT_EQ(get_cvar_num("mp_teamplay"), 1)
 	new dm = -1
 	for (new i = 0; i < 2; i++)
 	{
@@ -1312,8 +1323,8 @@ public pierce_counted()
 // models "seal|merc|gordon", a player of "third" (the second of the game's own two teams, joined
 // with "jointeam 2") wears the third team's model, gordon. The server is put in teamplay for the
 // test, with that list. The game runs game.cfg as it makes the rules, after the test has set the
-// list, so a game.cfg that sets the team list or models is put aside for the map change (as
-// tsgr_game.cfg) and back once the new map is up, or when this file loads next if the server
+// list, so a game.cfg that sets teamplay, the team list or models is put aside for the map change
+// (as tsgr_game.cfg) and back once the new map is up, or when this file loads next if the server
 // went down in between.
 
 #define GAMECFG "game.cfg"
@@ -1328,9 +1339,15 @@ RestoreGameCfg()
 	}
 }
 
-// Copies game.cfg aside and writes it back without its team list and team models lines; does
-// nothing when it has neither.
+// Copies game.cfg aside and writes it back without its teamplay, team list and team models lines;
+// does nothing when it has none of them.
 new g_CfgLines[32][128]
+
+bool:TeamCfgLine(const line[])
+{
+	return containi(line, "mp_teamplay") != -1 || containi(line, "mp_teamlist") != -1
+		|| containi(line, "mp_teammodels") != -1
+}
 
 SetGameCfgAside()
 {
@@ -1340,7 +1357,7 @@ SetGameCfgAside()
 	new count = 0, found = 0
 	while (count < sizeof(g_CfgLines) && fgets(f, g_CfgLines[count], charsmax(g_CfgLines[])))
 	{
-		if (containi(g_CfgLines[count], "mp_teamlist") != -1 || containi(g_CfgLines[count], "mp_teammodels") != -1)
+		if (TeamCfgLine(g_CfgLines[count]))
 			found = 1
 		count++
 	}
@@ -1350,7 +1367,7 @@ SetGameCfgAside()
 	rename_file(GAMECFG, GAMECFG_SAVED, 1)
 	f = fopen(GAMECFG, "wt")
 	for (new i = 0; i < count; i++)
-		if (containi(g_CfgLines[i], "mp_teamlist") == -1 && containi(g_CfgLines[i], "mp_teammodels") == -1)
+		if (!TeamCfgLine(g_CfgLines[i]))
 			fputs(f, g_CfgLines[i])
 	fclose(f)
 }
@@ -1377,6 +1394,7 @@ public dup_map()
 {
 	g_Teamplay = 1
 	RestoreGameCfg()
+	ASSERT_EQ(get_cvar_num("mp_teamplay"), 1)
 	g_P[0] = bench_puppet("thirdteam")
 	ASSERT(g_P[0] > 0)
 	bench_puppet_spawn(g_P[0], "dup_spawned", 20.0, "respawn")
@@ -2244,5 +2262,85 @@ public bubble_home()
 	get_localinfo(BUBBLE_KEY, home, charsmax(home))
 	set_localinfo(BUBBLE_KEY, "")
 	ASSERT_STR_EQ(g_Map, home)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The game registers neither mp_flashlight nor sv_busters, and does not precache
+// items/flashlight1.wav (plugin_precache watches the map's sound precaches).
+new g_SoundPrecaches
+new bool:g_FlashlightPrecached
+
+public plugin_precache()
+{
+	register_forward(FM_PrecacheSound, "on_precache_sound")
+}
+
+public on_precache_sound(const sample[])
+{
+	g_SoundPrecaches++
+	if (equali(sample, "items/flashlight1.wav"))
+		g_FlashlightPrecached = true
+	return FMRES_IGNORED
+}
+
+public test_no_flashlight_or_busters_settings()
+{
+	server_print("ts_gamerules: %d sound precaches seen, flashlight1.wav %d", g_SoundPrecaches, g_FlashlightPrecached)
+	ASSERT_FALSE(cvar_exists("mp_flashlight"))
+	ASSERT_FALSE(cvar_exists("sv_busters"))
+	ASSERT(g_SoundPrecaches > 0)
+	ASSERT_FALSE(g_FlashlightPrecached)
+	bench_pass()
+}
+
+// A spawn (TSInit, 0x82c1a-0x82e8e) zeroes the player fields only it touches (0x740, 0x77c-0x784,
+// the 33 at 0x184) and leaves the chat clock (0x7c0) no later than the spawn: values put there
+// before a respawn are gone after it.
+public test_spawn_zeroes_its_fields()
+{
+	new id = bench_puppet("zeroed")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "zeroed_alive", 20.0, "respawn")
+}
+
+public zeroed_alive(id)
+{
+	set_pdata_int(id, PDATA_INIT740, 1234, 0, 0)
+	for (new i = 0; i < 3; i++)
+		set_pdata_int(id, PDATA_INIT77C + i, 1234, 0, 0)
+	for (new i = 0; i < 33; i++)
+		set_pdata_int(id, PDATA_INIT184 + i, 1234, 0, 0)
+	set_pdata_float(id, PDATA_CHATTIME, get_gametime() + 100.0, 0, 0)
+	user_kill(id)
+	bench_wait_until("zeroed_dead", "zeroed_killed", 5.0, id)
+}
+
+public bool:zeroed_dead(id)
+{
+	return !is_user_alive(id)
+}
+
+public zeroed_killed(id)
+{
+	bench_puppet_spawn(id, "zeroed_respawned", 20.0, "respawn")
+}
+
+public zeroed_respawned(id)
+{
+	new left = 0
+	if (get_pdata_int(id, PDATA_INIT740, 0, 0) != 0)
+		left++
+	for (new i = 0; i < 3; i++)
+		if (get_pdata_int(id, PDATA_INIT77C + i, 0, 0) != 0)
+			left++
+	for (new i = 0; i < 33; i++)
+		if (get_pdata_int(id, PDATA_INIT184 + i, 0, 0) != 0)
+			left++
+	new Float:chat = get_pdata_float(id, PDATA_CHATTIME, 0, 0)
+	server_print("ts_gamerules: after the respawn %d of the 37 fields left, chat clock %.1f at %.1f", left, chat,
+		get_gametime())
+	ASSERT_EQ(left, 0)
+	ASSERT(chat <= get_gametime())
 	bench_pass()
 }

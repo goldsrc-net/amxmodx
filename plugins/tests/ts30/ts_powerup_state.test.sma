@@ -12,7 +12,8 @@
 // player's powerup goes back into the world where he lies, so does a spectator's, and a running
 // superjump powerup lowers his gravity; whatever lowers it, landing puts it back. A map with
 // powerups of its own gets no random ones. PreThink writes the animation rate as the slow factor
-// every frame.
+// every frame, and eases the slow factor from 0 without lifting it first. A super jump's landing
+// plants him with a varying pitch, or with duck held rolls.
 // ../ts_powerup_state.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -32,11 +33,15 @@ new Float:g_PreGravity
 // The animation rate test's player, and his rate after his last PreThink.
 new g_Rated
 new Float:g_PreRate
+// The slow factor test's player, and his fuser1 after his first PreThink (-1 until then).
+new g_Eased
+new Float:g_PreSlow
 
 public plugin_init()
 {
 	register_plugin("TS Powerup State Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	register_forward(FM_PlayerPreThink, "on_prethink", 1)
+	register_forward(FM_EmitSound, "on_land_sound")
 	register_forward(FM_CreateEntity, "on_create", 1)
 }
 
@@ -58,6 +63,8 @@ public on_prethink(id)
 		pev(id, pev_gravity, g_PreGravity)
 	if (id == g_Rated && g_Rated)
 		pev(id, pev_framerate, g_PreRate)
+	if (id == g_Eased && g_Eased && g_PreSlow < 0.0)
+		pev(id, pev_fuser1, g_PreSlow)
 	return FMRES_IGNORED
 }
 
@@ -381,5 +388,145 @@ public rated_after(id)
 	pev(id, pev_fuser1, slow)
 	server_print("ts_powerup_state: frame rate after PreThink %.3f (slow factor %.3f)", g_PreRate, slow)
 	ASSERT_NEAR(g_PreRate, 1.0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// A super jump's landing (PostThink's landing block, 0x818ec: on the ground with the wheel-done bit,
+// 0x100000, in iuser4) without duck held plants him with player/superjump-land.wav at pitch 95 plus
+// 0 to 31 (0x81997). The bit is set by the test on a player standing still, four times.
+#define IUSER4_WHEEL_DONE	0x100000
+#define IUSER4_ROLL	0x40000
+new g_Landed
+new g_LandSounds
+new g_LandPitch[8]
+new g_Landings
+
+public on_land_sound(ent, channel, const sample[], Float:volume, Float:attn, flags, pitch)
+{
+	if (ent == g_Landed && g_Landed && equal(sample, "player/superjump-land.wav") && g_LandSounds < sizeof(g_LandPitch))
+		g_LandPitch[g_LandSounds++] = pitch
+	return FMRES_IGNORED
+}
+
+public test_superjump_landing_pitch_varies()
+{
+	g_Landed = 0
+	g_LandSounds = 0
+	g_Landings = 0
+	new id = bench_puppet("planter")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "planter_alive", 20.0, "respawn")
+}
+
+public planter_alive(id)
+{
+	bench_wait_until("on_ground", "planter_land", 3.0, id)
+}
+
+public planter_land(id)
+{
+	g_Landed = id
+	set_pev(id, pev_iuser4, pev(id, pev_iuser4) | IUSER4_WHEEL_DONE)
+	g_Landings++
+	// the plant holds him 0.75 s
+	bench_next(g_Landings < 4 ? "planter_land" : "planter_done", 1.2, id)
+}
+
+public planter_done(id)
+{
+	g_Landed = 0
+	new not100 = 0, inRange = 0
+	for (new i = 0; i < g_LandSounds; i++)
+	{
+		server_print("ts_powerup_state: landing %d pitch %d", i + 1, g_LandPitch[i])
+		if (g_LandPitch[i] != 100)
+			not100++
+		if (g_LandPitch[i] >= 95 && g_LandPitch[i] <= 126)
+			inRange++
+	}
+	ASSERT_EQ(g_LandSounds, 4)
+	ASSERT_EQ(inRange, 4)
+	ASSERT(not100 > 0)
+	bench_pass()
+}
+
+// Landing from a super jump with duck held, running, rolls: the landing arms the roll's double-tap
+// window (0x81940) before it tries the roll, so the ground roll goes on the first try and there is
+// no plant and no landing sound.
+public test_superjump_landing_with_duck_rolls()
+{
+	g_Landed = 0
+	g_LandSounds = 0
+	new id = bench_puppet("roller")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "roller_alive", 20.0, "respawn")
+}
+
+public roller_alive(id)
+{
+	// ducked and running, past the duck press's own 0.3 s window
+	bench_puppet_input(id, IN_DUCK, 400.0)
+	bench_next("roller_running", 1.0, id)
+}
+
+public roller_running(id)
+{
+	new Float:v[3]
+	pev(id, pev_velocity, v)
+	server_print("ts_powerup_state: ducked run at %.0f, on the ground %d, iuser4 %x", floatsqroot(v[0] * v[0] + v[1] * v[1]),
+		on_ground(id), pev(id, pev_iuser4))
+	ASSERT(on_ground(id))
+	g_Landed = id
+	set_pev(id, pev_iuser4, pev(id, pev_iuser4) | IUSER4_WHEEL_DONE)
+	bench_next("roller_landed", 0.1, id)
+}
+
+public roller_landed(id)
+{
+	g_Landed = 0
+	bench_puppet_input(id, 0)
+	new iuser4 = pev(id, pev_iuser4)
+	server_print("ts_powerup_state: after the duck landing iuser4 %x, landing sounds %d", iuser4, g_LandSounds)
+	ASSERT(iuser4 & IUSER4_ROLL)
+	ASSERT_EQ(g_LandSounds, 0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// PreThink eases the slow factor (fuser1) from whatever it holds (0x80974): set to 0 on a living
+// player at normal speed, it is still well under 1.0 after his next PreThink (it eases by at most
+// seven frame times a frame), not lifted to 1.0 first.
+public test_prethink_eases_slow_factor_from_zero()
+{
+	g_Eased = 0
+	new id = bench_puppet("eased")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "eased_alive", 20.0, "respawn")
+}
+
+public eased_alive(id)
+{
+	bench_next("eased_settled", 0.5, id)
+}
+
+public eased_settled(id)
+{
+	g_PreSlow = -1.0
+	g_Eased = id
+	set_pev(id, pev_fuser1, 0.0)
+	bench_next("eased_after", 0.0, id)
+}
+
+public eased_after(id)
+{
+	if (g_PreSlow < 0.0)
+	{
+		bench_next("eased_after", 0.0, id)
+		return
+	}
+	g_Eased = 0
+	server_print("ts_powerup_state: slow factor after one PreThink from 0: %.3f", g_PreSlow)
+	ASSERT(g_PreSlow < 0.9)
 	bench_pass()
 }

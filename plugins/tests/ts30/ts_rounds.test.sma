@@ -69,6 +69,7 @@ public plugin_init()
 {
 	register_plugin("TS Round Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	get_mapname(g_Map, charsmax(g_Map))
+	RestoreGameCfg()
 	register_message(get_user_msgid("RoundTime"), "on_round_time")
 	register_message(get_user_msgid("Spectator"), "on_spectator")
 }
@@ -361,7 +362,42 @@ public last_restored(result)
 }
 
 // In plain teamplay there are no rounds: a team with nobody left alive does not win or restart
-// anything. (The server is put in teamplay for the test if it is not.)
+// anything. (The server is put in teamplay for the test if it is not. The map change execs game.cfg
+// before it installs the rules, so a game.cfg naming mp_teamplay is set aside without that line, as
+// tsr_game.cfg, until the new map is up, or until this file loads next if the server went down in
+// between.)
+#define GAMECFG "game.cfg"
+#define GAMECFG_SAVED "tsr_game.cfg"
+
+RestoreGameCfg()
+{
+	if (file_exists(GAMECFG_SAVED))
+	{
+		delete_file(GAMECFG)
+		rename_file(GAMECFG_SAVED, GAMECFG, 1)
+	}
+}
+
+// Copies game.cfg aside and writes it back without its mp_teamplay line.
+new g_CfgLines[32][128]
+
+SetGameCfgAside()
+{
+	new count = 0
+	new f = fopen(GAMECFG, "rt")
+	if (!f)
+		return
+	while (count < sizeof(g_CfgLines) && fgets(f, g_CfgLines[count], charsmax(g_CfgLines[])))
+		count++
+	fclose(f)
+	rename_file(GAMECFG, GAMECFG_SAVED, 1)
+	f = fopen(GAMECFG, "wt")
+	for (new i = 0; i < count; i++)
+		if (containi(g_CfgLines[i], "mp_teamplay") == -1)
+			fputs(f, g_CfgLines[i])
+	fclose(f)
+}
+
 public test_teamplay_wipe_is_not_a_round()
 {
 	bench_set_timeout(150.0)
@@ -373,6 +409,7 @@ public test_teamplay_wipe_is_not_a_round()
 	g_Saved = 1
 	g_Teamplay = 1
 	set_cvar_num("mp_teamplay", 1)
+	SetGameCfgAside()
 	bench_change_map(g_Map, "team_map", 1)
 }
 
@@ -382,6 +419,7 @@ public team_map(changed)
 {
 	g_Teamplay = changed
 	g_Saved = changed
+	ASSERT_EQ(get_cvar_num("mp_teamplay"), 1)
 	g_A = bench_puppet("teamone")
 	ASSERT(g_A > 0)
 	bench_puppet_spawn(g_A, "team_a_alive", 20.0, "respawn")

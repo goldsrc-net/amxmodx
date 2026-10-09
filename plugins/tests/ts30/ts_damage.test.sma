@@ -14,7 +14,8 @@
 // bullet's damage, the flying bullets of slow motion included, and each thrown blade's; a thrown
 // knife's hit reaches client_damage as its thrower's. TSHealth carries the health truncated, and
 // no Health or Battery message goes out; a death turns the dead player's items off for everyone
-// (ActItems) and sends him no CurWeapon. ../ts_damage.test.sma is the same on reTS.
+// (ActItems) and sends him no CurWeapon. A bash during a reload lands and cuts the reload.
+// ../ts_damage.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -541,5 +542,80 @@ public death_told(id)
 		new weapon = bench_msg_int(m, 1)
 		ASSERT(weapon != -1 && weapon != 255)
 	}
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The attack delay a reload sets lets a bash (+alt2) through for a weapon that has one
+// (ItemPostFrame, 0xcc523): a Desert Eagle's bash 0.3 s into its 2.1 s reload lands, and cuts the
+// reload (StopReload puts the attack delay back to now).
+// The player's attack delay (+0x12c), as a fakemeta pdata offset (no Linux difference), in ts_i386.so.
+#define PDATA_NEXTATTACK	(0x12c / 4)
+
+public test_bash_cuts_a_reload()
+{
+	g_P[0] = bench_puppet("reloadbasher")
+	g_P[1] = bench_puppet("reloadbashed")
+	ASSERT(g_P[0] > 0 && g_P[1] > 0)
+	bench_puppet_spawn(g_P[1], "rbash_victim", 20.0, "respawn")
+}
+
+public rbash_victim(id)
+{
+	bench_puppet_spawn(g_P[0], "rbash_spawned", 20.0, "respawn")
+}
+
+public rbash_spawned(id)
+{
+	ts_giveweapon(id, DEAGLE, 1, 0)
+	bench_next("rbash_armed", 2.0, id)
+}
+
+public rbash_armed(id)
+{
+	// one shot at the floor, so the clip is not full
+	new Float:angles[3] = {89.0, 0.0, 0.0}
+	bench_puppet_angles(id, angles)
+	Hold(id, IN_ATTACK, "rbash_fired")
+}
+
+public rbash_fired(id)
+{
+	bench_next("rbash_reload", 0.5, id)
+}
+
+public rbash_reload(id)
+{
+	Hold(id, IN_RELOAD, "rbash_reloading")
+}
+
+public rbash_reloading(id)
+{
+	// 0.2 s into the reload
+	new Float:delay = get_pdata_float(id, PDATA_NEXTATTACK, 0, 0)
+	server_print("ts_damage: attack delay 0.2 s into the reload %.2f", delay)
+	ASSERT(delay > 1.0)
+	ASSERT(Face(g_P[0], g_P[1], 20.0))
+	set_pev(g_P[1], pev_health, 100.0)
+	bench_next("rbash_bash", 0.1, id)
+}
+
+public rbash_bash(id)
+{
+	Hold(g_P[0], IN_CANCEL, "rbash_bashed")
+}
+
+public rbash_bashed(id)
+{
+	bench_next("rbash_landed", 0.1, id)
+}
+
+public rbash_landed(id)
+{
+	new Float:delay = get_pdata_float(g_P[0], PDATA_NEXTATTACK, 0, 0)
+	g_Hp[0] = 100 - Health(g_P[1])
+	server_print("ts_damage: bash 0.3 s into the reload took %d, attack delay after it %.2f", g_Hp[0], delay)
+	ASSERT(g_Hp[0] > 0)
+	ASSERT(delay < 1.0)
 	bench_pass()
 }
