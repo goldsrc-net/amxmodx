@@ -17,7 +17,10 @@
 // both from RemoveAllItems (PlayerDeathThink strips the dead player, 0x7ec15, then StartObserver),
 // none with the stock SDK's dead marker, and the death clears the player's field of view (pev->fov,
 // 0x7f48d). ActItems comes from the player's own update (0x823c7), with the akimbo tag 0x40 that
-// CTSGun::GetActiveItems adds. InitHUD sends a joiner the four server settings once.
+// CTSGun::GetActiveItems adds. InitHUD sends a joiner the four server settings once, and the team
+// roster only in his InitHUD frame; after it his HUD values go out only on a change (no slow motion,
+// award, health, armor or cash again after his second ResetHUD), with no WeaponList and no room type.
+// A spawn sends health, armor and cash once each.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -40,6 +43,7 @@ new BenchMsg:g_Mark
 public plugin_init()
 {
 	register_plugin("TS Message Tests", AMXX_VERSION_STR, "AMXX Dev Team")
+	RecordHooks()
 }
 
 // Holds buttons for a fifth of a second, then calls step(id).
@@ -626,5 +630,229 @@ public settled_waited(id)
 		count[0], count[1], count[2], count[3])
 	for (new i = 0; i < 4; i++)
 		ASSERT_EQ(count[i], 1)
+	bench_pass()
+}
+
+// --- The join stream ------------------------------------------------------------------------
+
+// Every message begun while g_Rec is set: its type, destination, target, game time and first
+// integer argument (-1 for none), from fakemeta's MessageBegin and Write* hooks, so the engine's
+// own svc messages (the room type, 37) are seen too.
+#define MAX_REC	1024
+#define SVC_ROOMTYPE	37
+
+new bool:g_Rec
+new g_RecCount
+new g_RType[MAX_REC]
+new g_RDest[MAX_REC]
+new g_REnt[MAX_REC]
+new Float:g_RTime[MAX_REC]
+new g_RArg0[MAX_REC]
+new bool:g_RInMsg
+new Float:g_Spawned
+
+RecordHooks()
+{
+	register_forward(FM_MessageBegin, "rec_begin")
+	register_forward(FM_WriteByte, "rec_int")
+	register_forward(FM_WriteChar, "rec_int")
+	register_forward(FM_WriteShort, "rec_int")
+	register_forward(FM_WriteLong, "rec_int")
+	register_forward(FM_MessageEnd, "rec_end")
+}
+
+public bench_teardown()
+{
+	g_Rec = false
+}
+
+Record()
+{
+	g_RecCount = 0
+	g_RInMsg = false
+	g_Rec = true
+}
+
+public rec_begin(dest, type, const Float:origin[3], ed)
+{
+	if (!g_Rec || g_RecCount >= MAX_REC)
+		return FMRES_IGNORED
+	g_RType[g_RecCount] = type
+	g_RDest[g_RecCount] = dest
+	g_REnt[g_RecCount] = ed
+	g_RTime[g_RecCount] = get_gametime()
+	g_RArg0[g_RecCount] = -1
+	g_RInMsg = true
+	return FMRES_IGNORED
+}
+
+public rec_int(value)
+{
+	if (g_Rec && g_RInMsg && g_RArg0[g_RecCount] == -1)
+		g_RArg0[g_RecCount] = value
+	return FMRES_IGNORED
+}
+
+public rec_end()
+{
+	if (g_Rec && g_RInMsg)
+		g_RecCount++
+	g_RInMsg = false
+	return FMRES_IGNORED
+}
+
+// Whether recorded message i reaches player id: sent to him alone or to everyone.
+bool:Reaches(i, id)
+{
+	if (g_RDest[i] == MSG_ONE || g_RDest[i] == MSG_ONE_UNRELIABLE)
+		return g_REnt[i] == id
+	return g_RDest[i] == MSG_ALL || g_RDest[i] == MSG_BROADCAST
+}
+
+// The game time of the joiner's InitHUD, or -1.0 if none was recorded.
+Float:InitHUDTime(id)
+{
+	new initHUD = get_user_msgid("InitHUD")
+	for (new i = 0; i < g_RecCount; i++)
+		if (g_RType[i] == initHUD && Reaches(i, id))
+			return g_RTime[i]
+	return -1.0
+}
+
+// How many recorded messages of type reach id after the time "after" (pass -1 as player to count
+// those whose first argument is any player, else only his).
+CountAfter(id, type, Float:after, player = -1)
+{
+	new count = 0
+	for (new i = 0; i < g_RecCount; i++)
+	{
+		if (g_RType[i] != type || !Reaches(i, id) || g_RTime[i] <= after)
+			continue
+		if (player != -1 && g_RArg0[i] != player)
+			continue
+		count++
+	}
+	return count
+}
+
+// A joiner gets the team roster (GameMode, TeamNames, TeamInfo) only from his InitHUD frame:
+// CHalfLifeTeamplay::InitHUD, ChangePlayerTeam and StartObserver (0xd45d8, 0xd488c), and nothing
+// sends it again while he waits to play, on a teamplay server or not.
+public test_joiner_told_the_team_roster_only_at_his_inithud()
+{
+	bench_set_timeout(20.0)
+	Record()
+	g_P = bench_puppet("rostered")
+	ASSERT(g_P > 0)
+	bench_wait_until("observing", "rostered_observing", 10.0, g_P)
+}
+
+public rostered_observing(id)
+{
+	// Past the 0.75 s a joiner's resend would wait, and a 3 s rebroadcast to everyone.
+	bench_next("rostered_waited", 3.5, id)
+}
+
+public rostered_waited(id)
+{
+	g_Rec = false
+	new Float:at = InitHUDTime(id)
+	ASSERT(at > 0.0)
+	new mode = get_user_msgid("GameMode"), names = get_user_msgid("TeamNames"), info = get_user_msgid("TeamInfo")
+	new modes = CountAfter(id, mode, -1.0), later = CountAfter(id, mode, at)
+	new nameCount = CountAfter(id, names, -1.0), namesLater = CountAfter(id, names, at)
+	new infoLater = CountAfter(id, info, at, id)
+	server_print("ts_messages: joiner roster, teamplay %d: GameMode %d (%d later), TeamNames %d (%d later), his TeamInfo later %d",
+		get_cvar_num("mp_teamplay"), modes, later, nameCount, namesLater, infoLater)
+	ASSERT_EQ(modes, 1)
+	ASSERT_EQ(later, 0)
+	ASSERT_EQ(namesLater, 0)
+	ASSERT_EQ(infoLater, 0)
+	bench_pass()
+}
+
+// After his InitHUD frame a waiting joiner's HUD values go out only when they change: no slow
+// motion or award re-send (UpdateClientData 0x822f9, 0x8245d send on a change), no health, armor or
+// cash after his second ResetHUD (that block of UpdateClientData, 0x81d57, clears no cache). The
+// original never sends WeaponList (only LinkUserMessages uses it), and the room type goes out only
+// from an env_sound (0xd0003), none of which reaches him here.
+public test_joiner_hud_not_sent_again()
+{
+	bench_set_timeout(20.0)
+	Record()
+	g_P = bench_puppet("hudjoiner")
+	ASSERT(g_P > 0)
+	bench_wait_until("observing", "hudjoiner_observing", 10.0, g_P)
+}
+
+public hudjoiner_observing(id)
+{
+	bench_next("hudjoiner_waited", 1.5, id)
+}
+
+public hudjoiner_waited(id)
+{
+	g_Rec = false
+	new Float:at = InitHUDTime(id)
+	ASSERT(at > 0.0)
+	new health = CountAfter(id, get_user_msgid("TSHealth"), at)
+	new armor = CountAfter(id, get_user_msgid("TSArmor"), at)
+	new cash = CountAfter(id, get_user_msgid("TSCash"), at)
+	new slow = CountAfter(id, get_user_msgid("TSSlowMo"), at)
+	new award = CountAfter(id, get_user_msgid("TSPAward"), at, id)
+	new list = CountAfter(id, get_user_msgid("WeaponList"), -1.0)
+	new room = CountAfter(id, SVC_ROOMTYPE, -1.0)
+	new resets = CountAfter(id, get_user_msgid("ResetHUD"), at)
+	server_print("ts_messages: after the joiner's InitHUD (%d more ResetHUD): TSHealth %d, TSArmor %d, TSCash %d, TSSlowMo %d, TSPAward %d; WeaponList %d, room type %d",
+		resets, health, armor, cash, slow, award, list, room)
+	ASSERT(resets >= 1)
+	ASSERT_EQ(health, 0)
+	ASSERT_EQ(armor, 0)
+	ASSERT_EQ(cash, 0)
+	ASSERT_EQ(slow, 0)
+	ASSERT_EQ(award, 0)
+	ASSERT_EQ(list, 0)
+	ASSERT_EQ(room, 0)
+	bench_pass()
+}
+
+// Spawning sends health, armor and cash once each after the spawn's ResetHUD: TSInit clears the
+// health and cash caches (0x82ac9, 0x82b02) and Spawn the armor's (0x7f9a0). No room type.
+public test_spawn_sends_health_armor_and_cash_once()
+{
+	bench_set_timeout(30.0)
+	Record()
+	g_P = bench_puppet("hudspawner")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "hudspawner_spawned", 20.0, "respawn")
+}
+
+public hudspawner_spawned(id)
+{
+	g_Spawned = get_gametime()
+	bench_next("hudspawner_settled", 0.5, id)
+}
+
+public hudspawner_settled(id)
+{
+	g_Rec = false
+	// The last ResetHUD before the spawn was seen: the spawn's.
+	new reset = get_user_msgid("ResetHUD"), Float:at = -1.0
+	for (new i = 0; i < g_RecCount; i++)
+		if (g_RType[i] == reset && Reaches(i, id) && g_RTime[i] <= g_Spawned)
+			at = g_RTime[i]
+	ASSERT(at > 0.0)
+	// Messages of the ResetHUD's own frame count: go back a hair.
+	at -= 0.0001
+	new health = CountAfter(id, get_user_msgid("TSHealth"), at)
+	new armor = CountAfter(id, get_user_msgid("TSArmor"), at)
+	new cash = CountAfter(id, get_user_msgid("TSCash"), at)
+	new room = CountAfter(id, SVC_ROOMTYPE, at)
+	server_print("ts_messages: from the spawn's ResetHUD: TSHealth %d, TSArmor %d, TSCash %d, room type %d",
+		health, armor, cash, room)
+	ASSERT_EQ(health, 1)
+	ASSERT_EQ(armor, 1)
+	ASSERT_EQ(cash, 1)
+	ASSERT_EQ(room, 0)
 	bench_pass()
 }

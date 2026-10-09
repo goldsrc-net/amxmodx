@@ -9,7 +9,8 @@
 
 //
 // Tests for what the original The Specialists 3.0 gives a gun a player drops and a knife or grenade he
-// throws: how long a dropped gun lies, its skin, and the slow-motion rate each starts at.
+// throws: how long a dropped gun lies, its skin, and the slow-motion rate each starts at, and the
+// speed below which a slowed gun on the ground settles.
 // ../ts_dropped.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -30,10 +31,14 @@
 new g_Gun
 new Float:g_Dropped
 new Float:g_Stay
+new g_FallThinks
+new g_FallSolid[2]
+new bool:g_FallWatch
 
 public plugin_init()
 {
 	register_plugin("TS Dropped Tests", AMXX_VERSION_STR, "AMXX Dev Team")
+	register_forward(FM_Think, "fall_think", 1)
 }
 
 public bench_setup()
@@ -44,6 +49,7 @@ public bench_setup()
 public bench_teardown()
 {
 	set_cvar_float("weaponstay", g_Stay)
+	g_FallWatch = false
 	new const classnames[][] = { "WorldGun", "knife", "grenade" }
 	for (new i = 0; i < sizeof(classnames); i++)
 	{
@@ -291,5 +297,64 @@ public bool:grenade_thrown(id)
 public slowgren_thrown(id)
 {
 	ASSERT_NEAR(Fuser1(FindClass("grenade")), 0.35)
+	bench_pass()
+}
+
+// A gun on the ground settles once it moves slower than its slow-motion rate times 3 (Fall, 0x90de9:
+// GiveSlowMul() x 3.0), so a gun at a quarter rate keeps going at 1.5 units/s, and settles (lands as a
+// trigger) once its slowed physics bring it to 0.375. The gun is held (no movement) on the ground.
+
+public test_slowed_gun_settles_below_its_rate_times_three()
+{
+	g_FallThinks = 0
+	new id = bench_puppet("falldrop")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "fall_spawned", 20.0, "respawn")
+}
+
+public fall_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	bench_next("fall_armed", 1.0, id)
+}
+
+public fall_armed(id)
+{
+	bench_puppet_cmd(id, "drop")
+	bench_wait_until("gun_dropped", "fall_dropped", 1.0, id)
+}
+
+public fall_dropped(id)
+{
+	g_Gun = FindClass("WorldGun")
+	// Still in flight: a landed gun is a trigger.
+	ASSERT_EQ(pev(g_Gun, pev_solid), SOLID_BBOX)
+	set_pev(g_Gun, pev_movetype, MOVETYPE_NONE)
+	set_pev(g_Gun, pev_flags, pev(g_Gun, pev_flags) | FL_ONGROUND)
+	set_pev(g_Gun, pev_fuser1, 0.25)
+	new Float:velocity[3] = {1.5, 0.0, 0.0}
+	set_pev(g_Gun, pev_velocity, velocity)
+	g_FallWatch = true
+	bench_wait_until("fall_two_thinks", "fall_thought", 1.0, id)
+}
+
+public fall_think(ent)
+{
+	if (g_FallWatch && ent == g_Gun && g_FallThinks < 2)
+		g_FallSolid[g_FallThinks++] = pev(ent, pev_solid)
+	return FMRES_IGNORED
+}
+
+public bool:fall_two_thinks(id)
+{
+	return g_FallThinks >= 2
+}
+
+public fall_thought(id)
+{
+	g_FallWatch = false
+	server_print("ts_dropped: slowed gun solid after its first think %d, second %d", g_FallSolid[0], g_FallSolid[1])
+	ASSERT_EQ(g_FallSolid[0], SOLID_BBOX)
+	ASSERT_EQ(g_FallSolid[1], SOLID_TRIGGER)
 	bench_pass()
 }
