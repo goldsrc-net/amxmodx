@@ -16,7 +16,8 @@
 // is announced (Spectator idx 0) only if he was watching (iuser1 or iuser2 set), and the "respawn"
 // command takes only a player in a spectator mode (iuser1 set). Spectating does not hide the HUD,
 // nor any part of it. Leaving spectate keeps iuser3. A joiner in last man standing is told the
-// round clock.
+// round clock. A player who went in during a round's re-entry window does not take it back to
+// spectate, and a zero view offset sets iuser4 bit 0x400000.
 // ../ts_observer.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386) patched with amxxbench's tests/patch-ts30.py: on
@@ -46,8 +47,10 @@ public plugin_init()
 	register_plugin("TS Observer Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	get_mapname(g_Map, charsmax(g_Map))
 	register_forward(FM_PlayerPostThink, "on_post_think")
+	register_forward(FM_PlayerPreThink, "on_prethink_post", 1)
 	register_message(get_user_msgid("Spectator"), "on_spectator")
 	register_message(get_user_msgid("HideWeapon"), "on_hide_weapon")
+	RestoreGameCfg()
 }
 
 new g_Leaver
@@ -466,9 +469,43 @@ public return_back(id)
 
 // Going to spectate again (a team change, in teamplay) does not reset the controls' 0.2 s clock:
 // jump pressed again at once does nothing. (The server is put in teamplay for the test if it is
-// not; the flag travels as the step's data, plugin variables start over on the map change.)
+// not; the flag travels as the step's data, plugin variables start over on the map change. The
+// map change execs game.cfg before it installs the rules, so a game.cfg naming mp_teamplay is set
+// aside without that line until the new map is up.)
 new g_TeamChanged
 new g_OldTeam[32]
+
+#define GAMECFG "game.cfg"
+#define GAMECFG_SAVED "tso_game.cfg"
+
+RestoreGameCfg()
+{
+	if (file_exists(GAMECFG_SAVED))
+	{
+		delete_file(GAMECFG)
+		rename_file(GAMECFG_SAVED, GAMECFG, 1)
+	}
+}
+
+// Copies game.cfg aside and writes it back without its mp_teamplay line.
+new g_CfgLines[32][128]
+
+SetGameCfgAside()
+{
+	new count = 0
+	new f = fopen(GAMECFG, "rt")
+	if (!f)
+		return
+	while (count < sizeof(g_CfgLines) && fgets(f, g_CfgLines[count], charsmax(g_CfgLines[])))
+		count++
+	fclose(f)
+	rename_file(GAMECFG, GAMECFG_SAVED, 1)
+	f = fopen(GAMECFG, "wt")
+	for (new i = 0; i < count; i++)
+		if (containi(g_CfgLines[i], "mp_teamplay") == -1)
+			fputs(f, g_CfgLines[i])
+	fclose(f)
+}
 
 public test_team_change_keeps_the_jump_clock()
 {
@@ -479,12 +516,14 @@ public test_team_change_keeps_the_jump_clock()
 		return
 	}
 	set_cvar_num("mp_teamplay", 1)
+	SetGameCfgAside()
 	bench_change_map(g_Map, "clock_team_map", 1)
 }
 
 public clock_team_map(changed)
 {
 	g_TeamChanged = changed
+	ASSERT_EQ(get_cvar_num("mp_teamplay"), 1)
 	g_Helper = bench_puppet("clockhelper")
 	ASSERT(g_Helper > 0)
 	bench_puppet_spawn(g_Helper, "clock_helper_alive", 20.0, "respawn")
@@ -822,5 +861,155 @@ public hold_restored(ok)
 {
 	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
 	ASSERT_EQ(ok, 1)
+	bench_pass()
+}
+
+// TSInit (each spawn) clears the re-entry window (0x82d5b): a player who went in to play during the
+// window does not take it back to spectate. Killed after the window has run out (out of respawns,
+// so nothing arms it again), he is not told "You have to wait until the next round." when he
+// reaches the spectate block. Two others play on so the round goes on.
+new g_ReentryPlayer
+new g_ReentryOthers[2]
+new BenchMsg:g_ReentryMark
+new Float:g_ReentryStart
+
+public test_reentry_window_ends_with_the_life()
+{
+	bench_set_timeout(150.0)
+	g_Lms = 1
+	g_RoundTime = get_cvar_num("roundtime")
+	set_cvar_num("lastmanstanding", 1)
+	set_cvar_num("roundtime", 180)
+	bench_change_map(g_Map, "reentry_map")
+}
+
+public reentry_map()
+{
+	g_ReentryPlayer = bench_puppet("reentryplayer")
+	ASSERT(g_ReentryPlayer > 0)
+	g_ReentryOthers[0] = bench_puppet("reentryother1")
+	ASSERT(g_ReentryOthers[0] > 0)
+	g_ReentryOthers[1] = bench_puppet("reentryother2")
+	ASSERT(g_ReentryOthers[1] > 0)
+	bench_wait_message(g_ReentryPlayer, "RoundTime", "", "reentry_round", 15.0)
+}
+
+public reentry_round(id)
+{
+	// past the 3 s gate, inside the window
+	bench_next("reentry_play", 4.0)
+}
+
+public reentry_play()
+{
+	g_ReentryStart = get_gametime()
+	bench_puppet_spawn(g_ReentryOthers[0], "reentry_other1", 2.0, "respawn")
+}
+
+public reentry_other1(id)
+{
+	bench_puppet_spawn(g_ReentryOthers[1], "reentry_other2", 2.0, "respawn")
+}
+
+public reentry_other2(id)
+{
+	bench_puppet_spawn(g_ReentryPlayer, "reentry_playing", 2.0, "respawn")
+}
+
+public reentry_playing(id)
+{
+	// to 1 s past the window's end (10 s after the round started, 7 s after reentry_play)
+	bench_next("reentry_kill", 7.0 - (get_gametime() - g_ReentryStart))
+}
+
+public reentry_kill()
+{
+	g_ReentryMark = bench_msg_last(g_ReentryPlayer, "TSMessage")
+	user_kill(g_ReentryPlayer)
+	bench_wait_until("spectating", "reentry_spectating", 12.0, g_ReentryPlayer)
+}
+
+public reentry_spectating(id)
+{
+	bench_next("reentry_done", 1.5)
+}
+
+public reentry_done()
+{
+	new waits = 0
+	new text[128]
+	for (new BenchMsg:msg = bench_msg_next(g_ReentryPlayer, g_ReentryMark, "TSMessage"); msg != BenchMsg:0;
+		msg = bench_msg_next(g_ReentryPlayer, msg, "TSMessage"))
+	{
+		bench_msg_text(msg, text, charsmax(text))
+		if (contain(text, "You have to wait until the next round.") != -1)
+			waits++
+	}
+	new alive = (is_user_alive(g_ReentryOthers[0]) ? 1 : 0) + (is_user_alive(g_ReentryOthers[1]) ? 1 : 0)
+	server_print("ts_observer: re-entry player killed after the window: iuser1 %d, told to wait %d, others alive %d",
+		pev(g_ReentryPlayer, pev_iuser1), waits, alive)
+	new ok = waits == 0 && alive == 2 && pev(g_ReentryPlayer, pev_iuser1) != 0
+	set_cvar_num("lastmanstanding", 0)
+	set_cvar_num("roundtime", g_RoundTime)
+	g_Lms = 0
+	bench_change_map(g_Map, "reentry_restored", ok ? 1 : 0)
+}
+
+public reentry_restored(ok)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	ASSERT_EQ(ok, 1)
+	bench_pass()
+}
+
+// PreThink sets iuser4 bit 0x400000 when the view offset is zero and clears it otherwise, every
+// frame, for every player (0x80b4a): a living player's offset set to zero gets the bit on his next
+// PreThink, and loses it once the offset is back.
+#define IUSER4_NOVIEWOFS 0x400000
+
+new g_Zeroed
+new g_ZeroedBits[2]
+
+public on_prethink_post(id)
+{
+	if (id == g_Zeroed && g_Zeroed)
+	{
+		new Float:ofs[3]
+		pev(id, pev_view_ofs, ofs)
+		new zero = ofs[0] == 0.0 && ofs[1] == 0.0 && ofs[2] == 0.0
+		g_ZeroedBits[zero] = pev(id, pev_iuser4) & IUSER4_NOVIEWOFS
+	}
+	return FMRES_IGNORED
+}
+
+public test_zero_view_offset_marks_iuser4()
+{
+	g_Zeroed = 0
+	new id = bench_puppet("zeroed")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "zeroed_alive", 20.0, "respawn")
+}
+
+public zeroed_alive(id)
+{
+	g_ZeroedBits[0] = -1
+	g_ZeroedBits[1] = -1
+	g_Zeroed = id
+	set_pev(id, pev_view_ofs, Float:{0.0, 0.0, 0.0})
+	bench_next("zeroed_marked", 0.1, id)
+}
+
+public zeroed_marked(id)
+{
+	set_pev(id, pev_view_ofs, Float:{0.0, 0.0, 17.0})
+	bench_next("zeroed_back", 0.1, id)
+}
+
+public zeroed_back(id)
+{
+	g_Zeroed = 0
+	server_print("ts_observer: iuser4 & 0x400000 with a zero view offset %d, with one %d", g_ZeroedBits[1], g_ZeroedBits[0])
+	ASSERT_EQ(g_ZeroedBits[1], IUSER4_NOVIEWOFS)
+	ASSERT_EQ(g_ZeroedBits[0], 0)
 	bench_pass()
 }

@@ -11,7 +11,8 @@
 // Tests for what the original The Specialists 3.0 does with a player's powerup each frame: a dead
 // player's powerup goes back into the world where he lies, so does a spectator's, and a running
 // superjump powerup lowers his gravity; whatever lowers it, landing puts it back. A map with
-// powerups of its own gets no random ones.
+// powerups of its own gets no random ones. PreThink writes the animation rate as the slow factor
+// every frame.
 // ../ts_powerup_state.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -28,6 +29,9 @@ new Float:g_Corpse[3]
 // The superjump test's player, and his gravity after his last PreThink (-1 until one has run).
 new g_Floater
 new Float:g_PreGravity
+// The animation rate test's player, and his rate after his last PreThink.
+new g_Rated
+new Float:g_PreRate
 
 public plugin_init()
 {
@@ -52,6 +56,8 @@ public on_prethink(id)
 {
 	if (id == g_Floater && g_Floater)
 		pev(id, pev_gravity, g_PreGravity)
+	if (id == g_Rated && g_Rated)
+		pev(id, pev_framerate, g_PreRate)
 	return FMRES_IGNORED
 }
 
@@ -342,5 +348,38 @@ public unslowed_later(id)
 	pev(id, pev_fuser1, rate)
 	server_print("ts_powerup_state: fuser1 with slowmatch 0.5: %f", rate)
 	ASSERT_NEAR(rate, 1.0)
+	bench_pass()
+}
+
+// PreThink writes the animation rate as the slow factor every frame, for every player (0x80999):
+// a living player's rate set to 0.3 is 1.0 again after his next PreThink.
+public test_prethink_writes_the_animation_rate()
+{
+	g_Rated = 0
+	new id = bench_puppet("rated")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "rated_alive", 20.0, "respawn")
+}
+
+public rated_alive(id)
+{
+	bench_next("rated_settled", 0.5, id)
+}
+
+public rated_settled(id)
+{
+	g_PreRate = -1.0
+	g_Rated = id
+	set_pev(id, pev_framerate, 0.3)
+	bench_next("rated_after", 0.1, id)
+}
+
+public rated_after(id)
+{
+	g_Rated = 0
+	new Float:slow
+	pev(id, pev_fuser1, slow)
+	server_print("ts_powerup_state: frame rate after PreThink %.3f (slow factor %.3f)", g_PreRate, slow)
+	ASSERT_NEAR(g_PreRate, 1.0)
 	bench_pass()
 }
