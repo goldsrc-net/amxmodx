@@ -108,13 +108,12 @@ Float:MaxSpeed(id)
 	return speed
 }
 
-// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up, truncated. (Floored: the
-// amd64 AMX Mod X core's floatround_tozero rounds 239.63 up to 240.)
+// GetSpeedBySlots in the game: 210 with no free slots, 330 from 81 up, truncated.
 SpeedBySlots(slots)
 {
 	if (slots > 80)
 		return 330
-	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_floor)
+	return floatround(float(slots) * 120.0 / 81.0 + 210.0, floatround_tozero)
 }
 
 // A powerup made the way ts_createpwup makes one, through fakemeta.
