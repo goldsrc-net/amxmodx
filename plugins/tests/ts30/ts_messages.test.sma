@@ -17,7 +17,7 @@
 // both from RemoveAllItems (PlayerDeathThink strips the dead player, 0x7ec15, then StartObserver),
 // none with the stock SDK's dead marker, and the death clears the player's field of view (pev->fov,
 // 0x7f48d). ActItems comes from the player's own update (0x823c7), with the akimbo tag 0x40 that
-// CTSGun::GetActiveItems adds.
+// CTSGun::GetActiveItems adds. InitHUD sends a joiner the four server settings once.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -595,5 +595,36 @@ public settings_sent(id)
 
 public settings_restored(id)
 {
+	bench_pass()
+}
+
+// InitHUD sends a joiner the four server settings once (0x691fe to 0x69316), and nothing sends them
+// again while he waits to play.
+public test_joiner_told_the_server_settings_once()
+{
+	g_P = bench_puppet("settled")
+	ASSERT(g_P > 0)
+	bench_wait_until("observing", "settled_observing", 10.0, g_P)
+}
+
+public settled_observing(id)
+{
+	// Well past the 0.75 s a resend would wait.
+	bench_next("settled_waited", 1.5, id)
+}
+
+public settled_waited(id)
+{
+	new count[4]
+	for (new BenchMsg:m = bench_msg_next(id, BenchMsg:0, "SrvSett"); m != BenchMsg:0; m = bench_msg_next(id, m, "SrvSett"))
+	{
+		new which = bench_msg_int(m, 0)
+		if (which >= 0 && which <= 3)
+			count[which]++
+	}
+	server_print("ts_messages: joiner SrvSett realbullet %d, usecash %d, ammocount %d, weaponrestriction %d",
+		count[0], count[1], count[2], count[3])
+	for (new i = 0; i < 4; i++)
+		ASSERT_EQ(count[i], 1)
 	bench_pass()
 }
