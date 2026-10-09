@@ -34,11 +34,15 @@ new Float:g_Stay
 new g_FallThinks
 new g_FallSolid[2]
 new bool:g_FallWatch
+new g_SettleStage
+new g_SettleSolid
+new Float:g_SettleSpeed
 
 public plugin_init()
 {
 	register_plugin("TS Dropped Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	register_forward(FM_Think, "fall_think", 1)
+	register_forward(FM_Think, "settle_think", 1)
 }
 
 public bench_setup()
@@ -50,6 +54,7 @@ public bench_teardown()
 {
 	set_cvar_float("weaponstay", g_Stay)
 	g_FallWatch = false
+	g_SettleStage = 0
 	new const classnames[][] = { "WorldGun", "knife", "grenade" }
 	for (new i = 0; i < sizeof(classnames); i++)
 	{
@@ -356,5 +361,79 @@ public fall_thought(id)
 	server_print("ts_dropped: slowed gun solid after its first think %d, second %d", g_FallSolid[0], g_FallSolid[1])
 	ASSERT_EQ(g_FallSolid[0], SOLID_BBOX)
 	ASSERT_EQ(g_FallSolid[1], SOLID_TRIGGER)
+	bench_pass()
+}
+
+// The think that settles a gun goes on to the lifetime check and, while the gun lives, the swept trace
+// and the slow-motion upkeep (Fall: 0x90e4e falls through to 0x90e51, CTSPhysicObject::WaitThink at
+// 0x91036). A held gun at rate 0.25 flying up at 100 saves that velocity and runs at 25; set on the
+// ground at 1 u/s and rate 0.5, the settling think rescales the saved 100 to 50.
+
+public test_settling_think_runs_the_slow_motion_upkeep()
+{
+	g_SettleStage = 0
+	new id = bench_puppet("settledrop")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "settle_spawned", 20.0, "respawn")
+}
+
+public settle_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	bench_next("settle_armed", 1.0, id)
+}
+
+public settle_armed(id)
+{
+	bench_puppet_cmd(id, "drop")
+	bench_wait_until("gun_dropped", "settle_dropped", 1.0, id)
+}
+
+public settle_dropped(id)
+{
+	g_Gun = FindClass("WorldGun")
+	ASSERT_EQ(pev(g_Gun, pev_solid), SOLID_BBOX)
+	set_pev(g_Gun, pev_movetype, MOVETYPE_NONE)
+	set_pev(g_Gun, pev_flags, pev(g_Gun, pev_flags) & ~FL_ONGROUND)
+	set_pev(g_Gun, pev_fuser1, 0.25)
+	new Float:velocity[3] = {0.0, 0.0, 100.0}
+	set_pev(g_Gun, pev_velocity, velocity)
+	g_SettleStage = 1
+	bench_wait_until("settle_two_thinks", "settle_thought", 1.0, id)
+}
+
+public settle_think(ent)
+{
+	if (ent != g_Gun || g_SettleStage == 0 || g_SettleStage > 2)
+		return FMRES_IGNORED
+	new Float:velocity[3]
+	if (g_SettleStage == 1)
+	{
+		// the flight think saved the 100 and scaled it to 25: now on the ground, slow, at rate 0.5
+		set_pev(ent, pev_flags, pev(ent, pev_flags) | FL_ONGROUND)
+		set_pev(ent, pev_fuser1, 0.5)
+		velocity[2] = 1.0
+		set_pev(ent, pev_velocity, velocity)
+	}
+	else
+	{
+		g_SettleSolid = pev(ent, pev_solid)
+		pev(ent, pev_velocity, velocity)
+		g_SettleSpeed = velocity[2]
+	}
+	g_SettleStage++
+	return FMRES_IGNORED
+}
+
+public bool:settle_two_thinks(id)
+{
+	return g_SettleStage > 2
+}
+
+public settle_thought(id)
+{
+	server_print("ts_dropped: settling think: solid %d, upward speed after it %.2f", g_SettleSolid, g_SettleSpeed)
+	ASSERT_EQ(g_SettleSolid, SOLID_TRIGGER)
+	ASSERT_NEAR(g_SettleSpeed, 50.0)
 	bench_pass()
 }

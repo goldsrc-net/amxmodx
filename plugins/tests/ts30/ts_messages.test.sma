@@ -648,8 +648,12 @@ new g_RDest[MAX_REC]
 new g_REnt[MAX_REC]
 new Float:g_RTime[MAX_REC]
 new g_RArg0[MAX_REC]
+new g_RArg1[MAX_REC]
+new g_RArgs[MAX_REC]
+new g_RStr[MAX_REC][24]
 new bool:g_RInMsg
 new Float:g_Spawned
+new Float:g_RespawnTime
 
 RecordHooks()
 {
@@ -658,12 +662,18 @@ RecordHooks()
 	register_forward(FM_WriteChar, "rec_int")
 	register_forward(FM_WriteShort, "rec_int")
 	register_forward(FM_WriteLong, "rec_int")
+	register_forward(FM_WriteString, "rec_string")
 	register_forward(FM_MessageEnd, "rec_end")
 }
 
 public bench_teardown()
 {
 	g_Rec = false
+	if (g_RespawnTime > 0.0)
+	{
+		set_cvar_float("respawntime", g_RespawnTime)
+		g_RespawnTime = 0.0
+	}
 }
 
 Record()
@@ -682,14 +692,30 @@ public rec_begin(dest, type, const Float:origin[3], ed)
 	g_REnt[g_RecCount] = ed
 	g_RTime[g_RecCount] = get_gametime()
 	g_RArg0[g_RecCount] = -1
+	g_RArg1[g_RecCount] = -1
+	g_RArgs[g_RecCount] = 0
+	g_RStr[g_RecCount][0] = 0
 	g_RInMsg = true
 	return FMRES_IGNORED
 }
 
 public rec_int(value)
 {
-	if (g_Rec && g_RInMsg && g_RArg0[g_RecCount] == -1)
-		g_RArg0[g_RecCount] = value
+	if (g_Rec && g_RInMsg)
+	{
+		if (g_RArgs[g_RecCount] == 0)
+			g_RArg0[g_RecCount] = value
+		else if (g_RArgs[g_RecCount] == 1)
+			g_RArg1[g_RecCount] = value
+		g_RArgs[g_RecCount]++
+	}
+	return FMRES_IGNORED
+}
+
+public rec_string(const value[])
+{
+	if (g_Rec && g_RInMsg && !g_RStr[g_RecCount][0])
+		copy(g_RStr[g_RecCount], charsmax(g_RStr[]), value)
 	return FMRES_IGNORED
 }
 
@@ -854,5 +880,179 @@ public hudspawner_settled(id)
 	ASSERT_EQ(armor, 1)
 	ASSERT_EQ(cash, 1)
 	ASSERT_EQ(room, 0)
+	bench_pass()
+}
+
+// A joiner, alive since ClientPutInServer's Spawn, is holstered by his InitHUD frame's StartObserver:
+// with the gun in hand Reset and HolsterWeapon, then the gun's Holster(0), HolsterWeapon again
+// (0x8970f-0x89755). Each sends the kung fu draw with skiplocal 0, so two svc_weaponanim (35) reach
+// him in that frame even though he predicts his weapons (cl_lw 1).
+#define SVC_WEAPONANIM	35
+
+public test_joiner_holstered_twice_at_his_start_observer()
+{
+	bench_set_timeout(20.0)
+	Record()
+	g_P = bench_puppet("holstered")
+	ASSERT(g_P > 0)
+	bench_wait_until("observing", "holstered_observing", 10.0, g_P)
+}
+
+public holstered_observing(id)
+{
+	g_Rec = false
+	new Float:at = InitHUDTime(id)
+	ASSERT(at > 0.0)
+	new anims = 0, first = -1
+	for (new i = 0; i < g_RecCount; i++)
+	{
+		if (g_RType[i] != SVC_WEAPONANIM || !Reaches(i, id) || g_RTime[i] != at)
+			continue
+		if (first == -1)
+			first = g_RArg0[i]
+		anims++
+	}
+	server_print("ts_messages: svc_weaponanim to the joiner in his InitHUD frame: %d (first sequence %d)", anims, first)
+	ASSERT_EQ(anims, 2)
+	ASSERT_EQ(first, 1)
+	bench_pass()
+}
+
+// UpdateClientData sends Train after TSArmor and before TSState (0x820f7-0x82146): on a spawn, whose
+// update sends all three, in that order.
+public test_spawn_sends_train_after_armor()
+{
+	bench_set_timeout(30.0)
+	Record()
+	g_P = bench_puppet("trainspawner")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "trainspawner_spawned", 20.0, "respawn")
+}
+
+public trainspawner_spawned(id)
+{
+	g_Spawned = get_gametime()
+	bench_next("trainspawner_settled", 0.5, id)
+}
+
+public trainspawner_settled(id)
+{
+	g_Rec = false
+	new reset = get_user_msgid("ResetHUD"), Float:at = -1.0
+	for (new i = 0; i < g_RecCount; i++)
+		if (g_RType[i] == reset && Reaches(i, id) && g_RTime[i] <= g_Spawned)
+			at = g_RTime[i]
+	ASSERT(at > 0.0)
+	new armor = get_user_msgid("TSArmor"), train = get_user_msgid("Train"), posture = get_user_msgid("TSState")
+	new iArmor = -1, iTrain = -1, iState = -1
+	for (new i = 0; i < g_RecCount; i++)
+	{
+		if (!Reaches(i, id) || g_RTime[i] != at)
+			continue
+		if (g_RType[i] == armor && iArmor == -1)
+			iArmor = i
+		else if (g_RType[i] == train && iTrain == -1)
+			iTrain = i
+		else if (g_RType[i] == posture && iState == -1)
+			iState = i
+	}
+	server_print("ts_messages: spawn update order: TSArmor %d, Train %d, TSState %d", iArmor, iTrain, iState)
+	ASSERT(iArmor >= 0)
+	ASSERT(iTrain > iArmor)
+	ASSERT(iState > iTrain)
+	bench_pass()
+}
+
+// A joiner's respawn countdown (PreThink's spectate block, 0x80e83-0x80fab) starts in his InitHUD
+// frame: UpdateClientData runs near the top of PreThink, so the StartObserver it calls is followed
+// by the frame's first line. Once a second it shows the seconds to the gate truncated, and "Press
+// Fire To Play!" when that truncates to 0, in the last second before the gate; nothing once the gate
+// has passed. With respawntime 5 that is four numbers (5 3 2 1, or 4 3 2 1 when the gate's float
+// rounds down), then the prompt.
+public test_joiner_countdown_as_the_original()
+{
+	bench_set_timeout(30.0)
+	g_RespawnTime = get_cvar_float("respawntime")
+	set_cvar_float("respawntime", 5.0)
+	Record()
+	g_P = bench_puppet("counted")
+	ASSERT(g_P > 0)
+	bench_wait_until("observing", "counted_observing", 10.0, g_P)
+}
+
+public counted_observing(id)
+{
+	// past the 5 s gate by 3 s, never pressing to play
+	bench_next("counted_waited", 8.0, id)
+}
+
+public counted_waited(id)
+{
+	g_Rec = false
+	set_cvar_float("respawntime", g_RespawnTime)
+	new Float:at = InitHUDTime(id)
+	ASSERT(at > 0.0)
+	new msg = get_user_msgid("TSMessage")
+	new lines = 0, numbers = 0, prompts = 0, bool:afterPrompt = false, Float:first = -1.0
+	new seq[64], len = 0
+	for (new i = 0; i < g_RecCount; i++)
+	{
+		if (g_RType[i] != msg || !Reaches(i, id))
+			continue
+		if (first < 0.0)
+			first = g_RTime[i]
+		lines++
+		if (prompts > 0)
+			afterPrompt = true
+		if (equal(g_RStr[i], "Press Fire To Play!"))
+			prompts++
+		else if (str_to_num(g_RStr[i]) > 0)
+			numbers++
+		len += formatex(seq[len], charsmax(seq) - len, "%s%s", len ? "," : "", g_RStr[i])
+	}
+	server_print("ts_messages: joiner countdown %s (first line %.4f, InitHUD %.4f)", seq, first, at)
+	ASSERT(first == at)
+	ASSERT_EQ(numbers, 4)
+	ASSERT_EQ(prompts, 1)
+	ASSERT_FALSE(afterPrompt)
+	ASSERT_EQ(lines, 5)
+	bench_pass()
+}
+
+// TSFade divides the 4.12 duration and hold by the recipient's slow-motion rate and truncates
+// (UTIL_ScreenFadeWrite 0xdccbf, 0xdccfb: fidivr, fistp with the rounding set to chop): a 1 s fade to
+// a player at rate 0.6 is 4096 / 0.6 = 6826.67, sent as 6826.
+public test_tsfade_truncates_the_slowed_time()
+{
+	bench_set_timeout(20.0)
+	g_P = bench_puppet("faded")
+	ASSERT(g_P > 0)
+	bench_wait_until("observing", "faded_observing", 10.0, g_P)
+}
+
+public faded_observing(id)
+{
+	new fade = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "env_fade"))
+	ASSERT(fade > 0)
+	set_pev(fade, pev_spawnflags, 4) // SF_FADE_ONLYONE: the activator alone
+	dllfunc(DLLFunc_Spawn, fade)
+	set_pev(fade, pev_dmg_take, 1.0) // Duration()
+	set_pev(fade, pev_dmg_save, 1.0) // HoldTime()
+	set_pev(fade, pev_renderamt, 255.0)
+	set_pev(id, pev_fuser1, 0.6)
+	Record()
+	dllfunc(DLLFunc_Use, fade, id)
+	g_Rec = false
+	engfunc(EngFunc_RemoveEntity, fade)
+	new tsfade = get_user_msgid("TSFade"), duration = -1, hold = -1
+	for (new i = 0; i < g_RecCount; i++)
+		if (g_RType[i] == tsfade && Reaches(i, id))
+		{
+			duration = g_RArg0[i]
+			hold = g_RArg1[i]
+		}
+	server_print("ts_messages: 1 s fade at slow 0.6: duration %d, hold %d", duration, hold)
+	ASSERT_EQ(duration, 6826)
+	ASSERT_EQ(hold, 6826)
 	bench_pass()
 }
