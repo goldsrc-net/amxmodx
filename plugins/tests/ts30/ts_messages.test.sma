@@ -314,12 +314,128 @@ public death_observing(id)
 	bench_pass()
 }
 
+// The strips leave a spectator no weapon bits at all, the suit's included: PlayerDeathThink and
+// StartObserver both call RemoveAllItems(1) (0x7ec15, 0x89986), and RemoveAllItems keeps none then.
+public test_death_leaves_no_weapon_bits()
+{
+	bench_set_timeout(30.0)
+	Armed("bitless", "bitless_ready")
+}
+
+public bitless_ready(id)
+{
+	ASSERT(pev(id, pev_weapons) != 0)
+	user_kill(id, 1)
+	bench_wait_until("observing", "bitless_observing", 15.0, id)
+}
+
+public bitless_observing(id)
+{
+	server_print("ts_messages: weapons spectating after a death %x", pev(id, pev_weapons))
+	ASSERT_EQ(pev(id, pev_weapons), 0)
+	bench_pass()
+}
+
+// A spawn strips nothing (PlayerSpawn 0x790ac): spawning a player who holds his guns sends no
+// CurWeapon 0 0 0, and he keeps the Glock-18.
+public test_spawn_while_armed_strips_nothing()
+{
+	bench_set_timeout(30.0)
+	Armed("respawned", "respawned_ready")
+}
+
+public respawned_ready(id)
+{
+	g_Mark = bench_msg_last(id)
+	dllfunc(DLLFunc_Spawn, id)
+	bench_next("respawned_after", 1.0, id)
+}
+
+public respawned_after(id)
+{
+	new count = 0
+	for (new BenchMsg:m = bench_msg_next(id, g_Mark, "CurWeapon"); m != BenchMsg:0; m = bench_msg_next(id, m, "CurWeapon"))
+	{
+		server_print("ts_messages: CurWeapon after the spawn %d %d %d", bench_msg_int(m, 0), bench_msg_int(m, 1), bench_msg_int(m, 2))
+		if (!bench_msg_int(m, 0) && !bench_msg_int(m, 1) && !bench_msg_int(m, 2))
+			count++
+	}
+	ASSERT(is_user_alive(id))
+	ASSERT_EQ(count, 0)
+	new clip, ammo, mode, extra
+	new weapon = ts_getuserwpn(id, clip, ammo, mode, extra)
+	server_print("ts_messages: after the spawn he holds %d", weapon)
+	ASSERT_EQ(weapon, GLOCK18)
+	bench_pass()
+}
+
+// No SetFOV goes out from a spawn: the original sends SetFOV only from Killed and StartObserver
+// (CBasePlayer::UpdateClientData has none), so after his last ResetHUD the new player gets none.
+public test_spawn_sends_no_setfov()
+{
+	g_P = bench_puppet("fovless")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "fovless_spawned", 20.0, "respawn")
+}
+
+public fovless_spawned(id)
+{
+	bench_next("fovless_later", 1.0, id)
+}
+
+public fovless_later(id)
+{
+	new BenchMsg:reset = bench_msg_last(id, "ResetHUD")
+	ASSERT(reset != BenchMsg:0)
+	new count = 0
+	for (new BenchMsg:m = bench_msg_next(id, reset, "SetFOV"); m != BenchMsg:0; m = bench_msg_next(id, m, "SetFOV"))
+		count++
+	ASSERT_EQ(count, 0)
+	bench_pass()
+}
+
+// StartObserver tells everyone the player has no active items (ActItems 0, 0x897b4), before its
+// SetFOV: a joiner gets one from InitHUD's StartObserver and, on a teamplay server, one more from
+// the team change that puts him on a team (StartObserver alone).
+public test_joiner_told_no_active_items_at_each_start_observer()
+{
+	g_P = bench_puppet("watched")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "watched_spawned", 20.0, "respawn")
+}
+
+public watched_spawned(id)
+{
+	new zeros = 0, fovs = 0, bool:first = true
+	for (new BenchMsg:m = bench_msg_next(id); m != BenchMsg:0; m = bench_msg_next(id, m))
+	{
+		new name[32]
+		bench_msg_name(m, name, charsmax(name))
+		if (equal(name, "SetFOV"))
+		{
+			fovs++
+			continue
+		}
+		if (!equal(name, "ActItems") || bench_msg_int(m, 0) != id)
+			continue
+		// each one comes before the SetFOV of its StartObserver
+		if (first)
+			ASSERT_EQ(fovs, 0)
+		first = false
+		ASSERT_EQ(bench_msg_int(m, 1), 0)
+		zeros++
+	}
+	server_print("ts_messages: joiner ActItems 0: %d, SetFOV %d, teamplay %d", zeros, fovs, get_cvar_num("mp_teamplay"))
+	ASSERT_EQ(zeros, get_cvar_num("mp_teamplay") ? 2 : 1)
+	bench_pass()
+}
+
 // --- ActItems --------------------------------------------------------------------------------
 
 #define BERETTA	2
 
 // A second Beretta makes Akimbo Berettas. Everyone is told the player's active items: 0 while he
-// joins (StartObserver; once more on a TS 3.0 teamplay server), then, with the pair out, the akimbo
+// joins (StartObserver; once more on a teamplay server), then, with the pair out, the akimbo
 // tag 0x40 alone (no attachment on), once, from his own update, which sends nothing while they stay
 // the same.
 public test_actitems_tags_akimbo()

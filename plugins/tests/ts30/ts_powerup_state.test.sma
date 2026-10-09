@@ -315,3 +315,32 @@ public random_watched(id)
 	server_print("ts_powerup_state: %d entities made in 22 s, no powerup", g_MadeCount)
 	bench_pass()
 }
+
+// The slowmatch cvar slows nobody by itself: the original's CTSGameRules::Think (0x67204) has no
+// per-frame slow motion for it (it only weighs the random powerup draw and the kill reward), so
+// with slowmatch at 0.5 a player keeps his normal rate (fuser1 1.0) for two seconds.
+new Float:g_Slowmatch
+
+public test_slowmatch_slows_nobody()
+{
+	g_Slowmatch = get_cvar_float("slowmatch")
+	new id = bench_puppet("unslowed")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "unslowed_spawned", 20.0, "respawn")
+}
+
+public unslowed_spawned(id)
+{
+	set_cvar_float("slowmatch", 0.5)
+	bench_next("unslowed_later", 2.0, id)
+}
+
+public unslowed_later(id)
+{
+	set_cvar_float("slowmatch", g_Slowmatch)
+	new Float:rate
+	pev(id, pev_fuser1, rate)
+	server_print("ts_powerup_state: fuser1 with slowmatch 0.5: %f", rate)
+	ASSERT_NEAR(rate, 1.0)
+	bench_pass()
+}
