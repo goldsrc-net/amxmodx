@@ -70,14 +70,34 @@ new g_PuppetCount
 new g_Wanted
 new g_Ready[32]
 
+// The game's "killed" log line for g_LogVictim, if any.
+new g_LogVictim[32]
+new g_LogKill[256]
+new g_BanForTK[16]
+
 public plugin_init()
 {
 	register_plugin("TSX The One Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	register_event("DeathMsg", "on_death_msg", "a")
 }
 
+public plugin_log()
+{
+	if (!g_LogVictim[0])
+		return PLUGIN_CONTINUE
+	new line[256], pattern[48]
+	read_logdata(line, charsmax(line))
+	formatex(pattern, charsmax(pattern), "killed ^"%s<", g_LogVictim)
+	if (contain(line, pattern) != -1)
+		copy(g_LogKill, charsmax(g_LogKill), line)
+	return PLUGIN_CONTINUE
+}
+
 public bench_setup()
 {
+	g_LogVictim[0] = 0
+	g_LogKill[0] = 0
+	get_cvar_string("banfortk", g_BanForTK, charsmax(g_BanForTK))
 	g_PlanLen = 0
 	g_PlanAt = 0
 	g_PuppetCount = 0
@@ -94,6 +114,7 @@ public bench_setup()
 public bench_teardown()
 {
 	set_cvar_num("mp_friendlyfire", 0)
+	set_cvar_string("banfortk", g_BanForTK)
 }
 
 public on_death_msg()
@@ -440,6 +461,241 @@ public new_one_done()
 	ASSERT_EQ(bench_msg_count(killer, "TSMessage", "#TS_Doublefrag"), 1)
 	if (!CheckKill(0, 0, 0, 0)) return
 	ASSERT_EQ(g_Streak[2], 3)
+	bench_pass()
+}
+
+// A team kill is logged as any kill: PlayerKilled writes the line itself (0x79e3d), after the rules'
+// DeathNotice, which for a teammate only says "teammate".
+public test_team_kill_is_logged()
+{
+	bench_set_timeout(90.0)
+	OneMode("tk_log_map")
+}
+
+public tk_log_map()
+{
+	Puppets(3, "tk_log_ready")
+}
+
+public tk_log_ready()
+{
+	new models[3][32]
+	for (new i = 0; i < 3; i++)
+		get_user_info(g_Puppets[i], "model", models[i], charsmax(models[]))
+	server_print("tsx_one: models of the One and the others: ^"%s^" ^"%s^" ^"%s^"", models[0], models[1], models[2])
+	set_cvar_num("mp_friendlyfire", 1)
+	get_user_name(g_Puppets[2], g_LogVictim, charsmax(g_LogVictim))
+	Plan(g_Puppets[1], g_Puppets[2])
+	RunPlan("tk_log_done")
+}
+
+public tk_log_done()
+{
+	ASSERT_STR_EQ(g_KillName[0], "teammate")
+	ASSERT(contain(g_LogKill, "^"one1<") == 0)
+	ASSERT(contain(g_LogKill, "with ^"glock-18^"") != -1)
+	server_print("tsx_one: %s", g_LogKill)
+	bench_pass()
+}
+
+// Three team kills, each within 30 s of the last, kick the killer, banfortk being 0 (PlayerKilled
+// 0x7ac7e): he is told in his console, everyone in chat.
+public test_three_team_kills_kick_the_killer()
+{
+	bench_set_timeout(120.0)
+	OneMode("tk_kick_map")
+}
+
+public tk_kick_map()
+{
+	Puppets(3, "tk_kick_ready")
+}
+
+public tk_kick_ready()
+{
+	set_cvar_num("mp_friendlyfire", 1)
+	set_cvar_num("banfortk", 0)
+	new a = g_Puppets[1], b = g_Puppets[2]
+	Plan(a, b)
+	Plan(a, b)
+	Plan(a, b)
+	RunPlan("tk_kick_done")
+}
+
+public tk_kick_done()
+{
+	new a = g_Puppets[1], b = g_Puppets[2]
+	ASSERT_STR_EQ(g_KillName[2], "teammate")
+	ASSERT_MSG(a, "TextMsg", "You have been kicked for teamkilling...")
+	ASSERT_MSG(b, "TextMsg", "one1 kicked for teamkilling")
+	bench_wait_until("kicked", "tk_kicked", 3.0, a)
+}
+
+public bool:kicked(id)
+{
+	return !is_user_connected(id)
+}
+
+public tk_kicked(id)
+{
+	bench_pass()
+}
+
+// Two team kills are not enough.
+public test_two_team_kills_do_not_kick()
+{
+	bench_set_timeout(120.0)
+	OneMode("tk_two_map")
+}
+
+public tk_two_map()
+{
+	Puppets(3, "tk_two_ready")
+}
+
+public tk_two_ready()
+{
+	set_cvar_num("mp_friendlyfire", 1)
+	set_cvar_num("banfortk", 0)
+	Plan(g_Puppets[1], g_Puppets[2])
+	Plan(g_Puppets[1], g_Puppets[2])
+	RunPlan("tk_two_done")
+}
+
+public tk_two_done()
+{
+	bench_next("tk_two_later", 1.0)
+}
+
+public tk_two_later()
+{
+	ASSERT(is_user_connected(g_Puppets[1]))
+	ASSERT_EQ(bench_msg_count(g_Puppets[2], "TextMsg", "kicked for teamkilling"), 0)
+	bench_pass()
+}
+
+// The One regenerates (PreThink 0x80bfe): each tick adds 0.16 health for every other player the
+// game counted at its last 10 s check (0x67468), ticks 1 / max(0.32 x others, 1) s apart. Two others:
+// 0.32 a second.
+public test_the_one_regenerates()
+{
+	bench_set_timeout(120.0)
+	OneMode("regen_map")
+}
+
+public regen_map()
+{
+	Puppets(3, "regen_ready")
+}
+
+public regen_ready()
+{
+	// The next 10 s check counts the two others.
+	bench_next("regen_counted", 11.0)
+}
+
+public regen_counted()
+{
+	set_pev(g_Puppets[0], pev_health, 100.0)
+	bench_next("regen_done", 3.5)
+}
+
+public regen_done()
+{
+	new Float:hp
+	pev(g_Puppets[0], pev_health, hp)
+	server_print("tsx_one: the One's health 3.5 s after 100: %.2f", hp)
+	ASSERT(hp > 100.6 && hp < 101.6)
+	bench_pass()
+}
+
+// However much he carries, the One moves at 330 (GetSpeedBySlots 0x66be8); another player with a
+// Barrett is slowed.
+public test_the_one_runs_at_full_speed()
+{
+	bench_set_timeout(90.0)
+	OneMode("speed_map")
+}
+
+public speed_map()
+{
+	Puppets(2, "speed_ready")
+}
+
+#define BARRETT		18
+
+public speed_ready()
+{
+	ts_giveweapon(g_Puppets[0], BARRETT, 1, 0)
+	ts_giveweapon(g_Puppets[1], BARRETT, 1, 0)
+	bench_next("speed_done", 1.0)
+}
+
+public speed_done()
+{
+	new Float:one, Float:other
+	pev(g_Puppets[0], pev_maxspeed, one)
+	pev(g_Puppets[1], pev_maxspeed, other)
+	server_print("tsx_one: maxspeed of the One %.1f, of the other %.1f", one, other)
+	ASSERT(one == 330.0)
+	ASSERT(other < 300.0)
+	bench_pass()
+}
+
+// However much he carries, the One can dive (CTSStunt::CanDive* 0x8a4ac): with a Barrett and a
+// Glock-18 (1 slot free) a dive along the floor takes him (gravity 0.75), where another player
+// would flop (gravity 1).
+new Float:g_DiveGravity
+
+public test_the_one_dives_however_loaded()
+{
+	bench_set_timeout(90.0)
+	OneMode("dive_map")
+}
+
+public dive_map()
+{
+	Puppets(1, "dive_ready")
+}
+
+public dive_ready()
+{
+	new one = g_Puppets[0]
+	ts_giveweapon(one, BARRETT, 1, 0)
+	// On ts_lobby's long flat floor (z 100) by the spawn point at -991 383.
+	engfunc(EngFunc_SetOrigin, one, Float:{-991.0, 383.0, 137.0})
+	set_pev(one, pev_velocity, Float:{0.0, 0.0, 0.0})
+	bench_puppet_angles(one, Float:{0.0, 0.0, 0.0})
+	bench_next("dive_run", 1.0, one)
+}
+
+public dive_run(one)
+{
+	// A dive needs speed (80 units a second) and +alt1 pressed, not held.
+	bench_puppet_input(one, 0, 400.0)
+	bench_next("dive_go", 0.3, one)
+}
+
+public dive_go(one)
+{
+	g_DiveGravity = 0.0
+	bench_puppet_input(one, IN_ALT1, 400.0)
+	bench_wait_until("one_diving", "dive_done", 2.0, one)
+}
+
+public bool:one_diving(id)
+{
+	if ((pev(id, pev_iuser4) & 0x10) == 0)
+		return false
+	pev(id, pev_gravity, g_DiveGravity)
+	return true
+}
+
+public dive_done(one)
+{
+	bench_puppet_input(one, 0)
+	server_print("tsx_one: the One's dive gravity %.2f", g_DiveGravity)
+	ASSERT(g_DiveGravity == 0.75)
 	bench_pass()
 }
 
