@@ -478,3 +478,122 @@ public twohands_told(id)
 		ASSERT_EQ(sent[i], 0)
 	bench_pass()
 }
+
+// --- spectating ------------------------------------------------------------------------------
+
+// StartObserver strips with RemoveAllItems(1) (0x89983), so a joiner who has not yet pressed fire
+// spectates with no weapon bits, the suit's included.
+public test_joiner_spectates_without_weapon_bits()
+{
+	g_P = bench_puppet("suitless")
+	ASSERT(g_P > 0)
+	bench_wait_until("observing", "suitless_observing", 10.0, g_P)
+}
+
+public suitless_observing(id)
+{
+	server_print("ts_messages: weapons of a spectating joiner %x", pev(id, pev_weapons))
+	ASSERT_EQ(pev(id, pev_weapons), 0)
+	bench_pass()
+}
+
+// StartObserver ends by telling everyone the player spectates (Spectator {idx, 1}, 0x899c2), right
+// after its strip (RemoveAllItems' CurWeapon 0 0 0): each of a joiner's StartObservers (InitHUD's,
+// and on a teamplay server the team change's) is closed so.
+public test_joiner_told_he_spectates_at_each_start_observer()
+{
+	g_P = bench_puppet("spectating")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "spectating_spawned", 20.0, "respawn")
+}
+
+public spectating_spawned(id)
+{
+	new starts = 0, closed = 0, bool:open = false, bool:stripped = false
+	for (new BenchMsg:m = bench_msg_next(id); m != BenchMsg:0; m = bench_msg_next(id, m))
+	{
+		new name[32]
+		bench_msg_name(m, name, charsmax(name))
+		new args = bench_msg_args(m)
+		if (stripped)
+		{
+			// the message right after the strip
+			if (equal(name, "Spectator") && bench_msg_int(m, 0) == id && bench_msg_int(m, 1) == 1)
+				closed++
+			stripped = false
+			open = false
+		}
+		if (equal(name, "ActItems") && bench_msg_int(m, 0) == id && bench_msg_int(m, 1) == 0)
+		{
+			starts++
+			open = true
+		}
+		else if (open && equal(name, "CurWeapon") && args == 3 && !bench_msg_int(m, 0)
+			&& !bench_msg_int(m, 1) && !bench_msg_int(m, 2))
+			stripped = true
+		else if (equal(name, "ResetHUD") && starts > 0)
+			break // his spawn
+	}
+	server_print("ts_messages: joiner StartObservers %d, closed by Spectator %d, teamplay %d", starts, closed,
+		get_cvar_num("mp_teamplay"))
+	ASSERT_EQ(starts, get_cvar_num("mp_teamplay") ? 2 : 1)
+	ASSERT_EQ(closed, starts)
+	bench_pass()
+}
+
+// --- server settings -------------------------------------------------------------------------
+
+// Think's SrvSett (0x675b3): realbullet and usecash go out when the cached whole number, as a float,
+// differs from the cvar, and the number cached and sent is the value chopped toward zero, so a
+// fractional value goes out every frame as its whole part (usecash as a bool). ammocount is chopped
+// first and compared as a whole number, so it goes out once.
+new Float:g_Bullet, Float:g_Cash, Float:g_Ammo
+
+public test_server_settings_truncate()
+{
+	g_P = bench_puppet("settings")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "settings_spawned", 20.0, "respawn")
+}
+
+public settings_spawned(id)
+{
+	g_Bullet = get_cvar_float("realbullet")
+	g_Cash = get_cvar_float("usecash")
+	g_Ammo = get_cvar_float("ammocount")
+	g_Mark = bench_msg_last(id)
+	set_cvar_float("realbullet", 0.5)
+	set_cvar_float("usecash", 0.5)
+	set_cvar_float("ammocount", g_Ammo + 2.7)
+	bench_next("settings_sent", 0.5, id)
+}
+
+public settings_sent(id)
+{
+	set_cvar_float("realbullet", g_Bullet)
+	set_cvar_float("usecash", g_Cash)
+	set_cvar_float("ammocount", g_Ammo)
+	new count[3], last[3]
+	for (new BenchMsg:m = bench_msg_next(id, g_Mark, "SrvSett"); m != BenchMsg:0; m = bench_msg_next(id, m, "SrvSett"))
+	{
+		new which = bench_msg_int(m, 0)
+		if (which < 0 || which > 2)
+			continue
+		count[which]++
+		last[which] = bench_msg_int(m, 1)
+	}
+	server_print("ts_messages: SrvSett realbullet %d x %d, usecash %d x %d, ammocount %d x %d",
+		count[0], last[0], count[1], last[1], count[2], last[2])
+	ASSERT(count[0] >= 3)
+	ASSERT_EQ(last[0], 0)
+	ASSERT(count[1] >= 3)
+	ASSERT_EQ(last[1], 0)
+	ASSERT_EQ(count[2], 1)
+	ASSERT_EQ(last[2], floatround(g_Ammo, floatround_tozero) + 2)
+	bench_next("settings_restored", 0.5, id)
+}
+
+public settings_restored(id)
+{
+	bench_pass()
+}
