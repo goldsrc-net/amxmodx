@@ -466,8 +466,33 @@ public test_superjump_landing_with_duck_rolls()
 public roller_alive(id)
 {
 	// ducked and running, past the duck press's own 0.3 s window
+	FaceOpenGround(id)
 	bench_puppet_input(id, IN_DUCK, 400.0)
 	bench_next("roller_running", 1.0, id)
+}
+
+// Face the puppet down the clearest of eight directions, so a spawn spot facing a wall does not
+// leave him running on the spot (once in 42 runs he stood still and landed without speed).
+FaceOpenGround(id)
+{
+	new Float:origin[3], Float:end[3], Float:angles[3], Float:frac, Float:best = -1.0
+	pev(id, pev_origin, origin)
+	for (new i = 0; i < 8; i++)
+	{
+		new Float:yaw = i * 45.0
+		end[0] = origin[0] + floatcos(yaw, degrees) * 256.0
+		end[1] = origin[1] + floatsin(yaw, degrees) * 256.0
+		end[2] = origin[2]
+		engfunc(EngFunc_TraceHull, origin, end, IGNORE_MONSTERS, HULL_HEAD, id, 0)
+		get_tr2(0, TR_flFraction, frac)
+		if (frac > best)
+		{
+			best = frac
+			angles[1] = yaw
+		}
+	}
+	server_print("ts_powerup_state: running toward yaw %.0f, clear for %.0f units", angles[1], best * 256.0)
+	bench_puppet_angles(id, angles)
 }
 
 public roller_running(id)
