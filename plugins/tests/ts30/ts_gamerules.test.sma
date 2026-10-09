@@ -22,7 +22,9 @@
 // every bullet slot in flight the game warns; in The One mode the team list's first name gives way
 // to "The ONE"; a ts_mapglobals keeps its saved fields through Spawn; a bullet in flight ends with
 // the map. A shot under water leaves a truncated count of bubbles. There is no mp_flashlight, no sv_busters and no
-// flashlight sound, and a spawn zeroes the fields only it touches.
+// flashlight sound, and a spawn zeroes the fields only it touches. There is no sv_allowbunnyhopping or
+// sv_pushable_fixed_tick_fudge (no "bj" physinfo); a pushable is pushed only by a player walking
+// forward or holding +use, and a pull drags it at 0.3 of his speed.
 // ../ts_gamerules.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -39,6 +41,9 @@
 #define PDATA_INIT77C	(0x77c / 4)
 #define PDATA_INIT184	(0x184 / 4)
 #define PDATA_CHATTIME	(0x7c0 / 4)
+// The PTakeDam throttle (+0x750) and +0x788, which TSInit zeroes too.
+#define PDATA_PTAKEDAM	(0x750 / 4)
+#define PDATA_INIT788	(0x788 / 4)
 
 #include <amxmodx>
 #include <fakemeta>
@@ -2274,6 +2279,11 @@ new bool:g_FlashlightPrecached
 public plugin_precache()
 {
 	register_forward(FM_PrecacheSound, "on_precache_sound")
+	// The pushable test makes a func_pushable after the map has loaded; its Spawn precaches these,
+	// which the engine allows then only for sounds already in the list.
+	precache_sound("debris/pushbox1.wav")
+	precache_sound("debris/pushbox2.wav")
+	precache_sound("debris/pushbox3.wav")
 }
 
 public on_precache_sound(const sample[])
@@ -2295,8 +2305,8 @@ public test_no_flashlight_or_busters_settings()
 }
 
 // A spawn (TSInit, 0x82c1a-0x82e8e) zeroes the player fields only it touches (0x740, 0x77c-0x784,
-// the 33 at 0x184) and leaves the chat clock (0x7c0) no later than the spawn: values put there
-// before a respawn are gone after it.
+// 0x788, the 33 at 0x184), the PTakeDam throttle (0x750) and the chat clock (0x7c0, which Spawn
+// leaves alone): values put there before a respawn are gone after it.
 public test_spawn_zeroes_its_fields()
 {
 	new id = bench_puppet("zeroed")
@@ -2311,6 +2321,8 @@ public zeroed_alive(id)
 		set_pdata_int(id, PDATA_INIT77C + i, 1234, 0, 0)
 	for (new i = 0; i < 33; i++)
 		set_pdata_int(id, PDATA_INIT184 + i, 1234, 0, 0)
+	set_pdata_int(id, PDATA_INIT788, 1234, 0, 0)
+	set_pdata_float(id, PDATA_PTAKEDAM, get_gametime() + 100.0, 0, 0)
 	set_pdata_float(id, PDATA_CHATTIME, get_gametime() + 100.0, 0, 0)
 	user_kill(id)
 	bench_wait_until("zeroed_dead", "zeroed_killed", 5.0, id)
@@ -2337,10 +2349,106 @@ public zeroed_respawned(id)
 	for (new i = 0; i < 33; i++)
 		if (get_pdata_int(id, PDATA_INIT184 + i, 0, 0) != 0)
 			left++
+	if (get_pdata_int(id, PDATA_INIT788, 0, 0) != 0)
+		left++
+	new Float:ptakedam = get_pdata_float(id, PDATA_PTAKEDAM, 0, 0)
 	new Float:chat = get_pdata_float(id, PDATA_CHATTIME, 0, 0)
-	server_print("ts_gamerules: after the respawn %d of the 37 fields left, chat clock %.1f at %.1f", left, chat,
-		get_gametime())
+	server_print("ts_gamerules: after the respawn %d of the 38 fields left, PTakeDam clock %.1f, chat clock %.1f at %.1f",
+		left, ptakedam, chat, get_gametime())
 	ASSERT_EQ(left, 0)
-	ASSERT(chat <= get_gametime())
+	ASSERT(ptakedam == 0.0)
+	ASSERT(chat == 0.0)
 	bench_pass()
+}
+
+// sv_allowbunnyhopping and sv_pushable_fixed_tick_fudge are halflife-updated's; the original has
+// neither, and no "bj" physinfo key (its PM_PreventMegaBunnyJumping, 0xf00d4, always runs).
+public test_no_bunnyhop_or_pushable_settings()
+{
+	ASSERT_FALSE(cvar_exists("sv_allowbunnyhopping"))
+	ASSERT_FALSE(cvar_exists("sv_pushable_fixed_tick_fudge"))
+	new id = bench_puppet("hopper")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "hopper_spawned", 20.0, "respawn")
+}
+
+public hopper_spawned(id)
+{
+	new value[8]
+	engfunc(EngFunc_GetPhysicsKeyValue, id, "bj", value, charsmax(value))
+	server_print("ts_gamerules: physinfo bj ^"%s^"", value)
+	ASSERT_STR_EQ(value, "")
+	bench_pass()
+}
+
+// CPushable::Move (0xb1c50): a player's touch pushes only while he walks forward or holds +use; a
+// pull (+use, its Use) moves the pushable by 0.3 of his velocity; either way he then moves at the
+// pushable's speed. A func_pushable is made from one of the map's brush models for each case and
+// removed again at once; the player runs at 100 units/s along x on the ground.
+public test_pushable_moves_as_the_original()
+{
+	new id = bench_puppet("pusher")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "pusher_spawned", 20.0, "respawn")
+}
+
+public pusher_spawned(id)
+{
+	bench_next("pusher_settled", 1.0, id)
+}
+
+public pusher_settled(id)
+{
+	ASSERT(pev(id, pev_flags) & FL_ONGROUND)
+	new Float:box[3], Float:him[3]
+	ASSERT(PushCase(id, 0, false, box, him))
+	server_print("ts_gamerules: touch with no buttons, pushable %.2f, player %.2f", box[0], him[0])
+	ASSERT(floatabs(box[0]) < 0.01)
+	ASSERT(floatabs(him[0] - 100.0) < 0.01)
+	ASSERT(PushCase(id, IN_FORWARD, false, box, him))
+	server_print("ts_gamerules: touch walking forward, pushable %.2f, player %.2f", box[0], him[0])
+	ASSERT(floatabs(box[0] - 100.0) < 0.01)
+	ASSERT(floatabs(him[0] - 100.0) < 0.01)
+	ASSERT(PushCase(id, IN_USE, true, box, him))
+	server_print("ts_gamerules: pull with +use, pushable %.2f, player %.2f", box[0], him[0])
+	ASSERT(floatabs(box[0] - 30.0) < 0.01)
+	ASSERT(floatabs(him[0] - 30.0) < 0.01)
+	new Float:still[3]
+	set_pev(id, pev_velocity, still)
+	bench_pass()
+}
+
+// One case: a fresh func_pushable, the player at 100 along x with buttons, then a touch (or a use),
+// the velocities read and the pushable removed. False when the map has no brush model to use.
+bool:PushCase(id, buttons, bool:use, Float:box[3], Float:him[3])
+{
+	new model[8]
+	for (new e = get_maxplayers() + 1; e < global_get(glb_maxEntities); e++)
+	{
+		if (!pev_valid(e))
+			continue
+		pev(e, pev_model, model, charsmax(model))
+		if (model[0] == '*')
+			break
+		model[0] = 0
+	}
+	if (model[0] != '*')
+		return false
+	new ent = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "func_pushable"))
+	if (!ent)
+		return false
+	set_pev(ent, pev_model, model)
+	dllfunc(DLLFunc_Spawn, ent)
+	new Float:run[3] = {100.0, 0.0, 0.0}
+	set_pev(id, pev_velocity, run)
+	set_pev(id, pev_button, buttons)
+	if (use)
+		dllfunc(DLLFunc_Use, ent, id)
+	else
+		dllfunc(DLLFunc_Touch, ent, id)
+	pev(ent, pev_velocity, box)
+	pev(id, pev_velocity, him)
+	engfunc(EngFunc_RemoveEntity, ent)
+	set_pev(id, pev_button, 0)
+	return true
 }

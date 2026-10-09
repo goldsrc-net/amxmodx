@@ -14,7 +14,8 @@
 // bullet's damage, the flying bullets of slow motion included, and each thrown blade's; a thrown
 // knife's hit reaches client_damage as its thrower's. TSHealth carries the health truncated, and
 // no Health or Battery message goes out; a death turns the dead player's items off for everyone
-// (ActItems) and sends him no CurWeapon. A bash during a reload lands and cuts the reload.
+// (ActItems) and sends him no CurWeapon. A bash during a reload lands and cuts the reload. After the
+// active item's frame the player's shared seed is rerolled.
 // ../ts_damage.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
@@ -617,5 +618,55 @@ public rbash_landed(id)
 	server_print("ts_damage: bash 0.3 s into the reload took %d, attack delay after it %.2f", g_Hp[0], delay)
 	ASSERT(g_Hp[0] > 0)
 	ASSERT(delay < 1.0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// After the active item's frame ItemPostFrame rerolls the shared seed (0xcc575: random_seed =
+// RANDOM_LONG(0, 32000)); CmdStart puts the usercmd's back before the next frame, so a weapon only
+// reads that. A puppet's usercmd seed is 0, so between frames its seed is the reroll: in range, and
+// not the same every time.
+// random_seed, in ts_i386.so: the original's +0x7ec, as a fakemeta pdata offset (no Linux difference).
+#define PDATA_SEED	(0x7ec / 4)
+
+new g_Seeds[8]
+new g_SeedCount
+
+public test_item_frame_rerolls_the_seed()
+{
+	g_P[0] = bench_puppet("seeded")
+	ASSERT(g_P[0] > 0)
+	bench_puppet_spawn(g_P[0], "seed_spawned", 20.0, "respawn")
+}
+
+public seed_spawned(id)
+{
+	ts_giveweapon(id, DEAGLE, 1, 0)
+	g_SeedCount = 0
+	bench_next("seed_sample", 1.0, id)
+}
+
+public seed_sample(id)
+{
+	g_Seeds[g_SeedCount++] = get_pdata_int(id, PDATA_SEED, 0, 0)
+	if (g_SeedCount < sizeof(g_Seeds))
+	{
+		bench_next("seed_sample", 0.05, id)
+		return
+	}
+	new distinct = 0
+	for (new i = 0; i < sizeof(g_Seeds); i++)
+	{
+		ASSERT(g_Seeds[i] >= 0 && g_Seeds[i] <= 32000)
+		new bool:seen = false
+		for (new j = 0; j < i; j++)
+			if (g_Seeds[j] == g_Seeds[i])
+				seen = true
+		if (!seen)
+			distinct++
+	}
+	server_print("ts_damage: seeds %d %d %d %d %d %d %d %d, %d different", g_Seeds[0], g_Seeds[1], g_Seeds[2],
+		g_Seeds[3], g_Seeds[4], g_Seeds[5], g_Seeds[6], g_Seeds[7], distinct)
+	ASSERT(distinct >= 4)
 	bench_pass()
 }
