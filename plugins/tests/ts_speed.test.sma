@@ -49,8 +49,46 @@ public walker_spawned(id)
 	bench_next("walker_ready", 1.0, id)
 }
 
+// Turns the puppet to the first of eight directions with room for 200 units of walking on level
+// floor. A spawn point can face a wall: on ts_lobby one stands 11 units from a wall to its east,
+// where a puppet that walks the way it spawned facing never gets going.
+bool:FaceOpenFloor(id)
+{
+	new Float:origin[3], Float:end[3], Float:below[3], Float:fraction, Float:angles[3]
+	pev(id, pev_origin, origin)
+	new tr = create_tr2(), bool:found = false
+
+	for (new i = 0; i < 8 && !found; i++)
+	{
+		angles[1] = float(i) * 45.0
+		end[0] = origin[0] + floatcos(angles[1], degrees) * 200.0
+		end[1] = origin[1] + floatsin(angles[1], degrees) * 200.0
+		end[2] = origin[2]
+		engfunc(EngFunc_TraceHull, origin, end, DONT_IGNORE_MONSTERS, HULL_HUMAN, id, tr)
+		get_tr2(tr, TR_flFraction, fraction)
+		if (fraction < 1.0)
+			continue
+
+		// Floor under the far end, no step down.
+		below[0] = end[0]
+		below[1] = end[1]
+		below[2] = end[2] - 40.0
+		engfunc(EngFunc_TraceHull, end, below, DONT_IGNORE_MONSTERS, HULL_HUMAN, id, tr)
+		get_tr2(tr, TR_flFraction, fraction)
+		if (fraction * 40.0 > 2.0)
+			continue
+
+		bench_puppet_angles(id, angles)
+		found = true
+	}
+
+	free_tr2(tr)
+	return found
+}
+
 public walker_ready(id)
 {
+	ASSERT(FaceOpenFloor(id))
 	set_user_maxspeed(id, 250.0)
 	bench_puppet_input(id, 0, 400.0)
 	g_Fastest = 0.0
