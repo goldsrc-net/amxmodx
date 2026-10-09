@@ -437,3 +437,63 @@ public settle_thought(id)
 	ASSERT_NEAR(g_SettleSpeed, 50.0)
 	bench_pass()
 }
+
+// Fall's swept trace never hurts a player (0x90f2b-0x90f3d: a hit whose IsPlayer() is true is
+// skipped): a gun held in the air above a player's head, falling at 2000 units/s, leaves him unhurt.
+new g_Victim
+
+public test_falling_gun_spares_a_player()
+{
+	bench_set_timeout(40.0)
+	g_Victim = bench_puppet("gunvictim")
+	ASSERT(g_Victim > 0)
+	bench_puppet_spawn(g_Victim, "spare_victim_up", 20.0, "respawn")
+}
+
+public spare_victim_up(victim)
+{
+	new id = bench_puppet("gundropper")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "spare_spawned", 20.0, "respawn")
+}
+
+public spare_spawned(id)
+{
+	ts_giveweapon(id, GLOCK18, 0, 0)
+	bench_next("spare_armed", 1.0, id)
+}
+
+public spare_armed(id)
+{
+	bench_puppet_cmd(id, "drop")
+	bench_wait_until("gun_dropped", "spare_dropped", 1.0, id)
+}
+
+public spare_dropped(id)
+{
+	g_Gun = FindClass("WorldGun")
+	ASSERT_EQ(pev(g_Gun, pev_solid), SOLID_BBOX)
+	set_pev(g_Victim, pev_health, 100.0)
+	new Float:origin[3]
+	pev(g_Victim, pev_origin, origin)
+	origin[2] += 56.0
+	set_pev(g_Gun, pev_movetype, MOVETYPE_NONE)
+	set_pev(g_Gun, pev_flags, pev(g_Gun, pev_flags) & ~FL_ONGROUND)
+	engfunc(EngFunc_SetOrigin, g_Gun, origin)
+	new Float:velocity[3] = {0.0, 0.0, -2000.0}
+	set_pev(g_Gun, pev_velocity, velocity)
+	bench_next("spare_fallen", 0.5, id)
+}
+
+public spare_fallen(id)
+{
+	new Float:health
+	pev(g_Victim, pev_health, health)
+	server_print("ts_dropped: player under a falling gun, health %.1f, gun solid %d", health, pev(g_Gun, pev_solid))
+	// still falling (in flight), and the player unhurt
+	ASSERT(IsWorldGun(g_Gun))
+	ASSERT_EQ(pev(g_Gun, pev_solid), SOLID_BBOX)
+	ASSERT(is_user_alive(g_Victim))
+	ASSERT_NEAR(health, 100.0)
+	bench_pass()
+}

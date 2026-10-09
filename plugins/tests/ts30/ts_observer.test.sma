@@ -698,3 +698,129 @@ public iuser3_in(id)
 	ASSERT_EQ(pev(id, pev_iuser3), 7)
 	bench_pass()
 }
+
+// PreThink eases the slow-motion rate (InterpolateSlowMotion, 0x8098e) and runs the stunt, animation
+// and melee timers before its spectate block (0x80e73), so a spectator's rate eases too: set to 0.5,
+// it is back near his target (1.0) a moment later.
+public test_spectator_eases_his_slow_motion()
+{
+	new id = bench_puppet("slowspec")
+	ASSERT(id > 0)
+	bench_wait_until("spectating", "slowspec_spectating", 10.0, id)
+}
+
+public slowspec_spectating(id)
+{
+	set_pev(id, pev_fuser1, 0.5)
+	bench_next("slowspec_eased", 0.5, id)
+}
+
+public slowspec_eased(id)
+{
+	new Float:rate
+	pev(id, pev_fuser1, rate)
+	server_print("ts_observer: spectator's slow-motion rate 0.5 s after 0.5: %.3f", rate)
+	ASSERT(pev(id, pev_iuser1) != 0)
+	ASSERT(rate > 0.9)
+	bench_pass()
+}
+
+// A round's re-entry window (RestartRound arms it 10 s out, the gate 3 s out) is a spectate-block
+// line once a second, its seconds truncated (0x81063): 6 down to 0 after the 3 s countdown. It runs
+// out inside the spectate block (0x80fb3) with "You have to wait until the next round."; a player
+// who went in to play in the window is not told that.
+new g_HoldWaiter
+new g_HoldPlayer
+new BenchMsg:g_HoldMark
+new BenchMsg:g_HoldMark2
+
+public test_lms_hold_window_counts_down_in_spectate()
+{
+	bench_set_timeout(150.0)
+	g_Lms = 1
+	g_RoundTime = get_cvar_num("roundtime")
+	set_cvar_num("lastmanstanding", 1)
+	set_cvar_num("roundtime", 180)
+	bench_change_map(g_Map, "hold_map")
+}
+
+public hold_map()
+{
+	g_HoldWaiter = bench_puppet("holdwaiter")
+	ASSERT(g_HoldWaiter > 0)
+	g_HoldPlayer = bench_puppet("holdplayer")
+	ASSERT(g_HoldPlayer > 0)
+	// The first round starts five seconds into the map, with a RoundTime to everyone.
+	bench_wait_message(g_HoldWaiter, "RoundTime", "", "hold_round", 15.0)
+}
+
+public hold_round(waiter)
+{
+	g_HoldMark = bench_msg_last(g_HoldWaiter, "RoundTime")
+	g_HoldMark2 = bench_msg_last(g_HoldPlayer, "RoundTime")
+	// past the 3 s gate, inside the window
+	bench_next("hold_play", 4.0)
+}
+
+public hold_play()
+{
+	bench_puppet_spawn(g_HoldPlayer, "hold_playing", 4.0, "respawn")
+}
+
+public hold_playing(player)
+{
+	// to 1 s past the window's end (10 s after the round started)
+	bench_next("hold_done", 6.0)
+}
+
+public hold_done()
+{
+	new lines = 0, first = -1, last = -1, bool:steps = true, waits = 0, bool:waitLast = false
+	new text[128]
+	for (new BenchMsg:msg = bench_msg_next(g_HoldWaiter, g_HoldMark, "TSMessage"); msg != BenchMsg:0;
+		msg = bench_msg_next(g_HoldWaiter, msg, "TSMessage"))
+	{
+		bench_msg_text(msg, text, charsmax(text))
+		if (contain(text, "seconds left for respawn") != -1)
+		{
+			new n = str_to_num(text)
+			if (lines > 0 && n != last - 1)
+				steps = false
+			if (first == -1)
+				first = n
+			last = n
+			lines++
+			waitLast = false
+		}
+		else if (contain(text, "You have to wait until the next round.") != -1)
+		{
+			waits++
+			waitLast = true
+		}
+	}
+	new playerWaits = 0
+	for (new BenchMsg:msg = bench_msg_next(g_HoldPlayer, g_HoldMark2, "TSMessage"); msg != BenchMsg:0;
+		msg = bench_msg_next(g_HoldPlayer, msg, "TSMessage"))
+	{
+		bench_msg_text(msg, text, charsmax(text))
+		if (contain(text, "You have to wait until the next round.") != -1)
+			playerWaits++
+	}
+	new alive = is_user_alive(g_HoldPlayer) ? 1 : 0
+	server_print("ts_observer: window lines %d, %d down to %d, steps %d, waits %d (last %d); player alive %d, told to wait %d",
+		lines, first, last, steps, waits, waitLast, alive, playerWaits)
+	// Put the map back first, so a failure leaves the next tests on the usual rules. Plugins reload on
+	// the map change, so the outcome travels as the step's data.
+	new ok = lines == 7 && first == 6 && last == 0 && steps && waits == 1 && waitLast && alive == 1 && playerWaits == 0
+	set_cvar_num("lastmanstanding", 0)
+	set_cvar_num("roundtime", g_RoundTime)
+	g_Lms = 0
+	bench_change_map(g_Map, "hold_restored", ok ? 1 : 0)
+}
+
+public hold_restored(ok)
+{
+	ASSERT_EQ(get_cvar_num("lastmanstanding"), 0)
+	ASSERT_EQ(ok, 1)
+	bench_pass()
+}

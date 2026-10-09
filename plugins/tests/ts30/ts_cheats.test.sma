@@ -10,8 +10,8 @@
 //
 // Tests for the original The Specialists 3.0's "powerup <n>" cheat: it works only when the map started
 // with sv_cheats 1, and its table is 1 slow pause, 2 a grenade, 3 kung fu and superjump together,
-// 4 more clips, 5 double fire rate, anything else slow motion. ../ts_cheats.test.sma is the same on
-// reTS.
+// 4 more clips, 5 double fire rate, anything else slow motion. Impulse 100 turns on no flashlight.
+// ../ts_cheats.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -150,5 +150,37 @@ public table_one(id)
 public table_restored()
 {
 	ASSERT_EQ(get_cvar_num("sv_cheats"), 0)
+	bench_pass()
+}
+
+// The original's ImpulseCommands (0xcb780) has 99, 201 and 204 and its CheatImpulseCommands no 100:
+// impulse 100 turns on no flashlight, whatever mp_flashlight says (here 1 where it exists).
+new g_Flashlight
+
+public test_impulse_100_has_no_flashlight()
+{
+	new id = bench_puppet("flashlighter")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "flashlighter_spawned", 20.0, "respawn")
+}
+
+public flashlighter_spawned(id)
+{
+	new cvar = get_cvar_pointer("mp_flashlight")
+	g_Flashlight = cvar ? get_pcvar_num(cvar) : -1
+	if (cvar)
+		set_pcvar_num(cvar, 1)
+	bench_puppet_input(id, 0, 0.0, 0.0, 0.0, 100)
+	bench_next("flashlighter_pressed", 0.5, id)
+}
+
+public flashlighter_pressed(id)
+{
+	bench_puppet_input(id, 0)
+	new cvar = get_cvar_pointer("mp_flashlight")
+	if (cvar && g_Flashlight != -1)
+		set_pcvar_num(cvar, g_Flashlight)
+	server_print("ts_cheats: after impulse 100, effects %d (mp_flashlight %s)", pev(id, pev_effects), cvar ? "registered" : "absent")
+	ASSERT_EQ(pev(id, pev_effects) & EF_DIMLIGHT, 0)
 	bench_pass()
 }

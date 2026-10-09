@@ -1056,3 +1056,122 @@ public faded_observing(id)
 	ASSERT_EQ(hold, 6826)
 	bench_pass()
 }
+
+// --- Idle anims -----------------------------------------------------------------------------
+
+// CTSGun::WeaponIdle (0x75646) and CCombatIdle (0x75e94) send their idle anims with skiplocal 0, so a
+// player predicting his weapons (cl_lw 1, as the puppets do) gets them from the server too: the gun's
+// every 3 s while its clip has rounds, the bare hands' every 3 s.
+public test_gun_idle_reaches_a_predicting_client()
+{
+	bench_set_timeout(30.0)
+	Armed("idler", "idler_ready")
+}
+
+public idler_ready(id)
+{
+	Record()
+	bench_next("idler_waited", 4.0, id)
+}
+
+public idler_waited(id)
+{
+	g_Rec = false
+	new anims = CountAfter(id, SVC_WEAPONANIM, -1.0)
+	server_print("ts_messages: svc_weaponanim to an idle gunman in 4 s: %d", anims)
+	ASSERT(anims >= 1)
+	bench_pass()
+}
+
+public test_bare_hands_idle_reaches_a_predicting_client()
+{
+	bench_set_timeout(30.0)
+	g_P = bench_puppet("barehanded")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "barehanded_spawned", 20.0, "respawn")
+}
+
+public barehanded_spawned(id)
+{
+	bench_next("barehanded_settled", 1.0, id)
+}
+
+public barehanded_settled(id)
+{
+	server_print("ts_messages: bare hands, weapon %d", ts_getuserwpn(id))
+	Record()
+	bench_next("barehanded_waited", 4.0, id)
+}
+
+public barehanded_waited(id)
+{
+	g_Rec = false
+	new anims = CountAfter(id, SVC_WEAPONANIM, -1.0)
+	server_print("ts_messages: svc_weaponanim to an idle kung fu fighter in 4 s: %d", anims)
+	ASSERT(anims >= 1)
+	bench_pass()
+}
+
+// --- PwUp ------------------------------------------------------------------------------------
+
+// UpdateClientData writes the held powerup's seconds clamped at 0 (0x82295). A slow motion powerup
+// with pwupmult -2 is held for 3 x -2 seconds, rounded: the PwUp that tells the player he holds it
+// says 0 seconds.
+public test_pwup_seconds_clamped_at_zero()
+{
+	bench_set_timeout(30.0)
+	g_P = bench_puppet("negheld")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "negheld_spawned", 20.0, "respawn")
+}
+
+public negheld_spawned(id)
+{
+	bench_next("negheld_settled", 0.5, id)
+}
+
+public negheld_settled(id)
+{
+	g_Mark = bench_msg_last(id, "PwUp")
+	new ent = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "ts_powerup"))
+	ASSERT(ent > 0)
+	set_kvd(0, KV_ClassName, "ts_powerup")
+	set_kvd(0, KV_KeyName, "pwuptype")
+	set_kvd(0, KV_Value, "1")
+	set_kvd(0, KV_fHandled, 0)
+	dllfunc(DLLFunc_KeyValue, ent, 0)
+	set_kvd(0, KV_ClassName, "ts_powerup")
+	set_kvd(0, KV_KeyName, "pwupmult")
+	set_kvd(0, KV_Value, "-2")
+	set_kvd(0, KV_fHandled, 0)
+	dllfunc(DLLFunc_KeyValue, ent, 0)
+	dllfunc(DLLFunc_Spawn, ent)
+	// just over his head: it lands on him
+	new Float:origin[3]
+	pev(id, pev_origin, origin)
+	origin[2] += 48.0
+	engfunc(EngFunc_SetOrigin, ent, origin)
+	bench_wait_until("negheld_holds", "negheld_told", 4.0, id)
+}
+
+public bool:negheld_holds(id)
+{
+	new BenchMsg:msg = bench_msg_next(id, g_Mark, "PwUp")
+	return msg != BenchMsg:0
+}
+
+public negheld_told(id)
+{
+	new told = 0
+	for (new BenchMsg:msg = bench_msg_next(id, g_Mark, "PwUp"); msg != BenchMsg:0; msg = bench_msg_next(id, msg, "PwUp"))
+	{
+		server_print("ts_messages: PwUp type %d, seconds %d", bench_msg_int(msg, 0), bench_msg_int(msg, 1))
+		if (bench_msg_int(msg, 0) == 1)
+		{
+			told++
+			ASSERT_EQ(bench_msg_int(msg, 1), 0)
+		}
+	}
+	ASSERT(told >= 1)
+	bench_pass()
+}
