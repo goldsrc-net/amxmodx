@@ -2597,6 +2597,8 @@ static const void * const amx_opcodelist[] = {
        fnum = floor(fnum + 0.5);
 	else  if (offs2 == 1)
        fnum = floor(fnum);
+	else  if (offs2 == 3 && fnum >= 0)
+       fnum = floor(fnum);
 	else
        fnum = ceil(fnum);
     pri = (cell)fnum;
@@ -3629,6 +3631,8 @@ int AMXAPI amx_Exec(AMX *amx, cell *retval, int index)
       if (!offs2)
          fnum = (REAL)floor(fnum + 0.5);
       else  if (offs2 == 1)
+         fnum = floor(fnum);
+      else  if (offs2 == 3 && fnum >= 0)
          fnum = floor(fnum);
 	  else
          fnum = ceil(fnum);
