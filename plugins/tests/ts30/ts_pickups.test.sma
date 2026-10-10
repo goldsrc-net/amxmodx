@@ -10,7 +10,8 @@
 //
 // Tests for what the original The Specialists 3.0 gives a player: kevlar holds 10 of the 81 free
 // slots, so a loadout too heavy for it gets no vest and a vest leaves less room for weapons; a ground
-// weapon shows its map text as a TSMessage. ../ts_pickups.test.sma is the same on reTS.
+// weapon shows its map text as a TSMessage; a grenade powerup gives one M61 only with 7 free slots and
+// fewer than 2 carried, and a refused one stays where it is. ../ts_pickups.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -24,11 +25,14 @@
 // The Specialists 3.0 weapon ids.
 #define GLOCK18		1
 #define BARRETT		18
+#define M61			24
 
 // The loadout item bit for kevlar (the buy menu's "tki 16").
 #define ITEM_KEVLAR	16
 
 new g_Ground
+new g_Pwup
+new g_Weapon
 
 public plugin_init()
 {
@@ -40,6 +44,7 @@ public bench_teardown()
 	if (g_Ground && pev_valid(g_Ground))
 		engfunc(EngFunc_RemoveEntity, g_Ground)
 	g_Ground = 0
+	RemovePowerup()
 }
 
 FreeSlots(id)
@@ -177,6 +182,224 @@ public finder_told(id)
 	ASSERT_EQ(bench_msg_int(msg, 4), 30)
 	ASSERT_EQ(bench_msg_count(id, "HudText", "You found a Glock."), 0)
 	bench_pass()
+}
+
+// --- the grenade powerup -----------------------------------------------------------------------
+
+// A grenade powerup gives one M61 through the same gate as any weapon: it needs 7 free slots and
+// a stack under 2. A refused one stays where it is. ts_createpwup's powerups come back like a map's
+// own, so a taken one hides until then.
+
+public bool:pwup_taken(id)
+{
+	return pev_valid(g_Pwup) && (pev(g_Pwup, pev_effects) & EF_NODRAW) != 0
+}
+
+RemovePowerup()
+{
+	if (pev_valid(g_Pwup))
+		engfunc(EngFunc_RemoveEntity, g_Pwup)
+	g_Pwup = 0
+}
+
+// One over his head: it lands on him.
+DropGrenadePowerup(id)
+{
+	new Float:origin[3]
+	pev(id, pev_origin, origin)
+	origin[2] += 48.0
+	g_Pwup = ts_createpwup(TSPWUP_GRENADE, origin)
+	return g_Pwup
+}
+
+// A map's own grenade powerup at his feet.
+PlaceGrenadePowerup(id)
+{
+	g_Pwup = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "ts_powerup"))
+	if (g_Pwup <= 0)
+		return 0
+	new num[8]
+	num_to_str(TSPWUP_GRENADE, num, charsmax(num))
+	PwupKeyValue(g_Pwup, "pwuptype", num)
+	dllfunc(DLLFunc_Spawn, g_Pwup)
+	new Float:origin[3]
+	pev(id, pev_origin, origin)
+	origin[2] += 48.0
+	engfunc(EngFunc_SetOrigin, g_Pwup, origin)
+	return g_Pwup
+}
+
+// A refused powerup has landed, can be touched and is still drawn.
+bool:PwupWaiting()
+{
+	return pev_valid(g_Pwup) && pev(g_Pwup, pev_solid) == SOLID_TRIGGER
+		&& !(pev(g_Pwup, pev_effects) & EF_NODRAW)
+}
+
+Grenades(id)
+{
+	new clip, ammo, mode, extra
+	if (ts_getuserwpn(id, clip, ammo, mode, extra) != M61)
+		return 0
+	return clip
+}
+
+public test_grenade_powerup_stacks_to_two()
+{
+	new id = bench_puppet("bomber")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "bomber_spawned", 20.0, "respawn")
+}
+
+public bomber_spawned(id)
+{
+	// Right after the spawn, bare handed.
+	ASSERT_EQ(FreeSlots(id), 81)
+	ASSERT(DropGrenadePowerup(id) > 0)
+	bench_wait_until("pwup_taken", "bomber_took_one", 4.0, id)
+}
+
+// The grenade comes out on the next frame.
+public bomber_took_one(id)
+{
+	bench_next("bomber_has_one", 0.3, id)
+}
+
+public bomber_has_one(id)
+{
+	// Taken and wielded.
+	ASSERT_EQ(Grenades(id), 1)
+	ASSERT_EQ(FreeSlots(id), 74)
+	RemovePowerup()
+	ASSERT(DropGrenadePowerup(id) > 0)
+	bench_wait_until("pwup_taken", "bomber_took_two", 4.0, id)
+}
+
+public bomber_took_two(id)
+{
+	bench_next("bomber_has_two", 0.3, id)
+}
+
+public bomber_has_two(id)
+{
+	// The slots show the second one. ts_getuserwpn's clip still reads 1: it comes from WeaponInfo,
+	// which the game sends again only when the weapon or its reserve changes.
+	ASSERT_EQ(ts_getuserwpn(id), M61)
+	ASSERT_EQ(FreeSlots(id), 67)
+	// Two is the most he carries: a third stays on the floor.
+	RemovePowerup()
+	ASSERT(DropGrenadePowerup(id) > 0)
+	bench_next("bomber_refused", 3.0, id)
+}
+
+public bomber_refused(id)
+{
+	ASSERT(PwupWaiting())
+	ASSERT_EQ(ts_getuserwpn(id), M61)
+	ASSERT_EQ(FreeSlots(id), 67)
+	bench_pass()
+}
+
+public test_grenade_powerup_needs_seven_slots()
+{
+	new id = bench_puppet("laden")
+	ASSERT(id > 0)
+	bench_next("laden_joined", 0.5, id)
+}
+
+public laden_joined(id)
+{
+	// A Barrett (70) and a Glock (10) leave one slot.
+	bench_puppet_cmd(id, "tkw %d_0 %d_0", BARRETT, GLOCK18)
+	bench_puppet_spawn(id, "laden_spawned", 20.0, "respawn")
+}
+
+public laden_spawned(id)
+{
+	ASSERT_EQ(FreeSlots(id), 1)
+	bench_next("laden_settled", 0.5, id)
+}
+
+public laden_settled(id)
+{
+	g_Weapon = ts_getuserwpn(id)
+	ASSERT(DropGrenadePowerup(id) > 0)
+	bench_next("laden_refused", 3.0, id)
+}
+
+public laden_refused(id)
+{
+	ASSERT(PwupWaiting())
+	ASSERT_EQ(FreeSlots(id), 1)
+	ASSERT_EQ(ts_getuserwpn(id), g_Weapon)
+	// A map's own one is refused the same way and keeps waiting.
+	RemovePowerup()
+	ASSERT(PlaceGrenadePowerup(id) > 0)
+	bench_next("laden_refused_placed", 3.0, id)
+}
+
+public laden_refused_placed(id)
+{
+	ASSERT(PwupWaiting())
+	ASSERT_EQ(FreeSlots(id), 1)
+	ASSERT_EQ(ts_getuserwpn(id), g_Weapon)
+	bench_pass()
+}
+
+public test_grenade_powerup_with_room_for_one()
+{
+	new id = bench_puppet("sniper")
+	ASSERT(id > 0)
+	bench_next("sniper_joined", 0.5, id)
+}
+
+public sniper_joined(id)
+{
+	// A Barrett alone leaves 11 slots: room for one grenade, not two.
+	bench_puppet_cmd(id, "tkw %d_0", BARRETT)
+	bench_puppet_spawn(id, "sniper_spawned", 20.0, "respawn")
+}
+
+public sniper_spawned(id)
+{
+	ASSERT_EQ(FreeSlots(id), 11)
+	bench_next("sniper_settled", 0.5, id)
+}
+
+public sniper_settled(id)
+{
+	// A map's own one: taken, then hidden until it comes back.
+	ASSERT(PlaceGrenadePowerup(id) > 0)
+	bench_next("sniper_has_one", 3.0, id)
+}
+
+public sniper_has_one(id)
+{
+	ASSERT(pev_valid(g_Pwup))
+	ASSERT(pev(g_Pwup, pev_effects) & EF_NODRAW)
+	ASSERT_EQ(Grenades(id), 1)
+	ASSERT_EQ(FreeSlots(id), 4)
+	RemovePowerup()
+	ASSERT(DropGrenadePowerup(id) > 0)
+	bench_next("sniper_refused", 3.0, id)
+}
+
+public sniper_refused(id)
+{
+	// One grenade of two, but only 4 slots left.
+	ASSERT(PwupWaiting())
+	ASSERT_EQ(Grenades(id), 1)
+	ASSERT_EQ(FreeSlots(id), 4)
+	bench_pass()
+}
+
+PwupKeyValue(ent, const key[], const value[])
+{
+	set_kvd(0, KV_ClassName, "ts_powerup")
+	set_kvd(0, KV_KeyName, key)
+	set_kvd(0, KV_Value, value)
+	set_kvd(0, KV_fHandled, 0)
+	dllfunc(DLLFunc_KeyValue, ent, 0)
 }
 
 KeyValue(ent, const key[], const value[])
