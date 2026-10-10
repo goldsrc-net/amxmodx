@@ -18,7 +18,8 @@
 // nor any part of it. Leaving spectate keeps iuser3. A joiner in last man standing is told the
 // round clock. A player who went in during a round's re-entry window does not take it back to
 // spectate, and a zero view offset sets iuser4 bit 0x400000. A window that runs out leaves the
-// respawn gate at -1.0.
+// respawn gate at -1.0. Holding attack does not take a joiner out of spectate; one "respawn"
+// after his wait does.
 // ../ts_observer.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386) patched with amxxbench's tests/patch-ts30.py: on
@@ -1019,5 +1020,68 @@ public zeroed_back(id)
 	server_print("ts_observer: iuser4 & 0x400000 with a zero view offset %d, with one %d", g_ZeroedBits[1], g_ZeroedBits[0])
 	ASSERT_EQ(g_ZeroedBits[1], IUSER4_NOVIEWOFS)
 	ASSERT_EQ(g_ZeroedBits[0], 0)
+	bench_pass()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The fire button does not spawn a spectator: the server's observer controls take jump, forward and
+// back, and only the client's "respawn" command (which the client sends when +attack is pressed)
+// leaves spectate. A joiner holding attack from his first frame to past his respawn wait is still
+// spectating; after the wait one "respawn" puts him in play.
+
+new g_FireHeld
+new Float:g_FireUntil
+
+public test_held_fire_does_not_spawn_a_joiner()
+{
+	bench_set_timeout(60.0)
+	new id = bench_puppet("fireheld")
+	ASSERT(id > 0)
+	bench_puppet_input(id, IN_ATTACK)
+	g_FireHeld = 0
+	new Float:wait = get_cvar_float("respawntime")
+	if (wait < 5.0)
+		wait = 5.0
+	if (wait > 30.0)
+		wait = 30.0
+	g_FireUntil = get_gametime() + wait + 3.0
+	bench_wait_until("spectating", "fireheld_spectating", 5.0, id)
+}
+
+public fireheld_spectating(id)
+{
+	bench_wait_until("fireheld_waited", "fireheld_still_spectating", 40.0, id)
+}
+
+// counts the frames he spends in play while holding attack, until the wait is well over
+public bool:fireheld_waited(id)
+{
+	if (is_user_alive(id) && pev(id, pev_iuser1) == 0)
+		g_FireHeld++
+	return get_gametime() > g_FireUntil
+}
+
+public fireheld_still_spectating(id)
+{
+	server_print("ts_observer: holding attack past the wait, frames in play %d, iuser1 %d, buttons %d",
+		g_FireHeld, pev(id, pev_iuser1), pev(id, pev_button))
+	ASSERT_EQ(g_FireHeld, 0)
+	ASSERT(pev(id, pev_iuser1) != 0)
+	bench_puppet_input(id, 0)
+	engclient_cmd(id, "respawn")
+	bench_wait_until("fireheld_alive", "fireheld_respawned", 2.0, id)
+}
+
+public bool:fireheld_alive(id)
+{
+	return is_user_alive(id) != 0
+}
+
+public fireheld_respawned(id)
+{
+	server_print("ts_observer: one respawn after the wait, alive %d, iuser1 %d", is_user_alive(id),
+		pev(id, pev_iuser1))
+	ASSERT(is_user_alive(id))
+	ASSERT_EQ(pev(id, pev_iuser1), 0)
 	bench_pass()
 }
