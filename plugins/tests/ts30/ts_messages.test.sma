@@ -398,6 +398,34 @@ public fovless_later(id)
 	bench_pass()
 }
 
+// The client data carries pev->fov (UpdateClientData, 0xa0294): a plugin that sets only pev->fov
+// changes the field of view the player is sent, and a player who is not zoomed is sent 0, so his
+// client uses its default_fov.
+public test_clientdata_fov_is_pev_fov()
+{
+	g_P = bench_puppet("fovsent")
+	ASSERT(g_P > 0)
+	bench_puppet_spawn(g_P, "fovsent_spawned", 20.0, "respawn")
+}
+
+Float:SentFov(id)
+{
+	dllfunc(DLLFunc_UpdateClientData, id, 0, 0)
+	new Float:fov
+	get_cd(0, CD_FOV, fov)
+	return fov
+}
+
+public fovsent_spawned(id)
+{
+	ASSERT_EQ(floatround(SentFov(id)), 0)
+	set_pev(id, pev_fov, 55.0)
+	ASSERT_EQ(floatround(SentFov(id)), 55)
+	set_pev(id, pev_fov, 0.0)
+	ASSERT_EQ(floatround(SentFov(id)), 0)
+	bench_pass()
+}
+
 // StartObserver tells everyone the player has no active items (ActItems 0, 0x897b4), before its
 // SetFOV: a joiner gets one from InitHUD's StartObserver and, on a teamplay server, one more from
 // the team change that puts him on a team (StartObserver alone).
