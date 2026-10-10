@@ -721,7 +721,7 @@ static int decode_one_a64(unsigned char *func, unsigned char *dest)
 		int64_t imm = sign_extend(imm21, 21);
 		int64_t imm_scaled = op ? (imm << 12) : imm;
 		uintptr_t orig_pc = (uintptr_t)func;
-		uintptr_t orig_target = op ? ((orig_pc & ~0xFFFu) + (uintptr_t)imm_scaled)
+		uintptr_t orig_target = op ? ((orig_pc & ~(uintptr_t)0xFFF) + (uintptr_t)imm_scaled)
 		                           : (orig_pc + (uintptr_t)imm_scaled);
 		uintptr_t new_pc = (uintptr_t)dest;
 		intptr_t new_off;
