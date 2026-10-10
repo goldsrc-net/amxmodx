@@ -11,7 +11,8 @@
 // Tests for what the original The Specialists 3.0 gives a player: kevlar holds 10 of the 81 free
 // slots, so a loadout too heavy for it gets no vest and a vest leaves less room for weapons; a ground
 // weapon shows its map text as a TSMessage; a grenade powerup gives one M61 only with 7 free slots and
-// fewer than 2 carried, and a refused one stays where it is. ../ts_pickups.test.sma is the same on reTS.
+// fewer than 2 carried, and a refused one stays where it is; throwing the last one brings out the next
+// weapon. ../ts_pickups.test.sma is the same on reTS.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -26,6 +27,9 @@
 #define GLOCK18		1
 #define BARRETT		18
 #define M61			24
+#define SKORPION	17
+#define BULL		31
+#define KATANA		34
 
 // The loadout item bit for kevlar (the buy menu's "tki 16").
 #define ITEM_KEVLAR	16
@@ -33,6 +37,7 @@
 new g_Ground
 new g_Pwup
 new g_Weapon
+new BenchMsg:g_Mark
 
 public plugin_init()
 {
@@ -390,6 +395,86 @@ public sniper_refused(id)
 	ASSERT(PwupWaiting())
 	ASSERT_EQ(Grenades(id), 1)
 	ASSERT_EQ(FreeSlots(id), 4)
+	bench_pass()
+}
+
+// Throwing the last grenade: the game takes the M61 off the bar (WStatus owned 0), gives the slots
+// back and brings out the best weapon left (WeaponInfo), which the client draws from.
+public test_last_grenade_thrown_brings_out_the_next_weapon()
+{
+	new id = bench_puppet("pitcher")
+	ASSERT(id > 0)
+	bench_next("pitcher_joined", 0.5, id)
+}
+
+public pitcher_joined(id)
+{
+	// Raging Bull, katana and Skorpion: 40 slots, 41 free.
+	bench_puppet_cmd(id, "tkw %d_0 %d_0 %d_0", BULL, KATANA, SKORPION)
+	bench_puppet_spawn(id, "pitcher_spawned", 20.0, "respawn")
+}
+
+public pitcher_spawned(id)
+{
+	bench_next("pitcher_settled", 1.0, id)
+}
+
+public pitcher_settled(id)
+{
+	ASSERT_EQ(FreeSlots(id), 41)
+	ASSERT(DropGrenadePowerup(id) > 0)
+	bench_wait_until("pwup_taken", "pitcher_took", 4.0, id)
+}
+
+public pitcher_took(id)
+{
+	RemovePowerup()
+	bench_next("pitcher_holding", 1.5, id)
+}
+
+public pitcher_holding(id)
+{
+	ASSERT_EQ(ts_getuserwpn(id), M61)
+	ASSERT_EQ(FreeSlots(id), 34)
+	g_Mark = bench_msg_last(id)
+	new Float:angles[3]
+	pev(id, pev_v_angle, angles)
+	angles[0] = -45.0
+	bench_puppet_angles(id, angles)
+	bench_puppet_input(id, IN_ATTACK)
+	bench_next("pitcher_cooked", 0.6, id)
+}
+
+public pitcher_cooked(id)
+{
+	// Letting go throws it.
+	bench_puppet_input(id, 0)
+	bench_next("pitcher_threw", 2.0, id)
+}
+
+public pitcher_threw(id)
+{
+	ASSERT_EQ(FreeSlots(id), 41)
+	ASSERT_EQ(ts_getuserwpn(id), SKORPION)
+	new BenchMsg:m = g_Mark, name[32], status = 0, info = 0
+	while ((m = bench_msg_next(id, m)) != BenchMsg:0)
+	{
+		bench_msg_name(m, name, charsmax(name))
+		if (equal(name, "WStatus"))
+		{
+			// Only the M61's own cell changes.
+			ASSERT_EQ(bench_msg_int(m, 0), M61)
+			ASSERT_EQ(bench_msg_int(m, 1), 0)
+			status++
+		}
+		else if (equal(name, "WeaponInfo"))
+		{
+			ASSERT_EQ(bench_msg_int(m, 0), SKORPION)
+			info++
+		}
+	}
+	ASSERT_EQ(status, 1)
+	ASSERT_EQ(info, 1)
 	bench_pass()
 }
 
