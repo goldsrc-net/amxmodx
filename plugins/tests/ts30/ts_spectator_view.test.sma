@@ -26,6 +26,7 @@
 
 new g_Target
 new g_Spec
+new g_Presses
 
 public plugin_init()
 {
@@ -102,7 +103,6 @@ public viewer_locked_settled(id)
 
 // Jump goes on round the modes (3, 2, 1, 5); with other players about it can land elsewhere, so it
 // is pressed again, a few times at most, until the eyes come up.
-new g_Presses
 
 public viewer_eyes(id)
 {
