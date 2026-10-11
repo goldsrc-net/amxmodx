@@ -86,6 +86,7 @@ public viewer_chasing(id)
 public viewer_locked(id)
 {
 	ASSERT_EQ(pev(id, pev_iuser1), TS_OBS_LOCKED)
+	g_Presses = 0
 	bench_next("viewer_locked_settled", 0.5, id)
 }
 
@@ -99,10 +100,24 @@ public viewer_locked_settled(id)
 	bench_puppet_press(id, IN_JUMP, "viewer_eyes")
 }
 
+// Jump goes on round the modes (3, 2, 1, 5); with other players about it can land elsewhere, so it
+// is pressed again, a few times at most, until the eyes come up.
+new g_Presses
+
 public viewer_eyes(id)
 {
+	if (pev(id, pev_iuser1) != TS_OBS_EYES && ++g_Presses < 6)
+	{
+		bench_next("viewer_press_again", 0.3, id)
+		return
+	}
 	ASSERT_EQ(pev(id, pev_iuser1), TS_OBS_EYES)
 	bench_next("viewer_eyes_settled", 0.5, id)
+}
+
+public viewer_press_again(id)
+{
+	bench_puppet_press(id, IN_JUMP, "viewer_eyes")
 }
 
 public viewer_eyes_settled(id)
