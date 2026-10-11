@@ -14,7 +14,8 @@
 // chat clock); the stock Half-Life models refused as a player model in deathmatch; the timer and
 // custom target entities; the ammo pack a dead player leaves; the grenades a dead player leaves;
 // the M61 left out of the spawn loadout outside the round modes; the cold cock's close-combat
-// damage bit; and no server-side bullet trail sprites with realbullet.
+// damage bit; no server-side bullet trail sprites with realbullet; the powerup bits and stunt flags
+// in the client data; and the AK47's name in the death notice.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -31,6 +32,7 @@
 // The Specialists 3.0 weapon ids.
 #define GLOCK18		1
 #define DEAGLE		12
+#define AK47		13
 #define M61			24
 
 // The close-combat damage bit The Specialists adds to melee hits.
@@ -46,12 +48,23 @@ new g_DamageBits
 new g_Trails
 new bool:g_Grenades
 new Float:g_Fell[3]
+new g_Victim
+new g_DeathWeapon[32]
 
 public plugin_init()
 {
 	register_plugin("TS 3.0 Server Gap Tests", AMXX_VERSION_STR, "AMXX Dev Team")
 	RegisterHam(Ham_TakeDamage, "player", "on_damage")
 	register_forward(FM_SetModel, "on_set_model")
+	register_event("DeathMsg", "on_death_msg", "a")
+}
+
+
+
+public on_death_msg()
+{
+	if (g_Victim && read_data(2) == g_Victim)
+		read_data(3, g_DeathWeapon, charsmax(g_DeathWeapon))
 }
 
 public bench_setup()
@@ -62,6 +75,8 @@ public bench_setup()
 	g_FriendlyFire = get_cvar_num("mp_friendlyfire")
 	g_TeamplayCvar = get_cvar_num("mp_teamplay")
 	g_Grenades = false
+	g_Victim = 0
+	g_DeathWeapon[0] = 0
 }
 
 public bench_teardown()
@@ -562,5 +577,56 @@ public real_done()
 	// The shot landed.
 	ASSERT(g_DamageBits != -1)
 	ASSERT_EQ(g_Trails, 0)
+	bench_pass()
+}
+
+// --- the client data -------------------------------------------------------------------------
+
+// UpdateClientData (0xa0294) sends the active powerup bits in vuser1.y, and the stunt flags
+// (iuser4) whether or not the client predicts weapons.
+public test_clientdata_powerups_and_stunt_flags()
+{
+	new id = bench_puppet("cdpowerup")
+	ASSERT(id > 0)
+	bench_puppet_spawn(id, "cd_spawned", 20.0, "respawn")
+}
+
+public cd_spawned(id)
+{
+	ts_force_run_powerup(id, TSPWUP_DFIRERATE)
+	new Float:zero[3]
+	set_cd(0, CD_vUser1, zero)
+	dllfunc(DLLFunc_UpdateClientData, id, 1, 0)
+	new Float:v[3]
+	get_cd(0, CD_vUser1, v)
+	ASSERT_EQ(floatround(v[1]), TSPWUP_DFIRERATE)
+	set_cd(0, CD_iUser4, -1)
+	dllfunc(DLLFunc_UpdateClientData, id, 0, 0)
+	ASSERT_EQ(get_cd(0, CD_iUser4), pev(id, pev_iuser4))
+	bench_pass()
+}
+
+// --- the weapon table ------------------------------------------------------------------------
+
+// The AK47's name in the weapon table is "AK47" (Write_ak47 copies it, 0xf6600), so a kill with it
+// names it in the death notice.
+public test_ak47_kill_names_the_weapon()
+{
+	set_cvar_num("mp_friendlyfire", 1)
+	Pair("akkiller", "akvictim", AK47, "ak_ready")
+}
+
+public ak_ready()
+{
+	g_Victim = g_P[1]
+	set_pev(g_P[1], pev_health, 1.0)
+	ExecuteHamB(Ham_TakeDamage, g_P[1], g_P[0], g_P[0], 10.0, DMG_BULLET)
+	bench_next("ak_killed", 0.3)
+}
+
+public ak_killed()
+{
+	ASSERT_FALSE(is_user_alive(g_P[1]))
+	ASSERT_STR_EQ(g_DeathWeapon, "AK47")
 	bench_pass()
 }
