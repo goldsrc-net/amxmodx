@@ -12,8 +12,9 @@
 // another: the kill cash (500 a point and 400 more for the killer, 900 for the victim);
 // with slowmatch at 1, a slow motion powerup to hold for a scoring kill; a slow-motion bubble where
 // the victim fell, after a spectacular kill, as spectacularness allows; the headshot, knife,
-// katana and cold cock notices naming the killer; and the kill with the victim's own weapon (the
-// one he bought), told to everyone and tagged " (victims_weapon)" in the log.
+// katana and cold cock notices naming the killer; the kill with the victim's own weapon (the one he
+// bought), told to everyone and tagged " (victims_weapon)" in the log; and the doubled points a
+// quick second styled kill announces.
 //
 // These need the stock stack (HLDS, TS 3.0 i386): run.sh --tests plugins/tests/ts30 stock
 //
@@ -600,6 +601,47 @@ public own_killed()
 	ASSERT_EQ(g_DeathKiller, g_P[0])
 	ASSERT(Notice("ownkiller #TS_Killed ownvictim #TS_OwnWeapon"))
 	ASSERT(contain(g_Logged, "with ^"glock-18^" (victims_weapon)") != -1)
+	bench_pass()
+}
+
+// A second styled kill within 2 s of the last doubles the points its line announces, and a killer
+// on a run of more than 8 kills doubles them again; the points scored are not doubled
+// (TSGetPointsForFrag 0x7956e-0x7959c doubles only what it passes to "%i #TS_Frg #TS_FrgFr %s, %s").
+// Two kung fu kills, 2 points each, one right after the other.
+new g_Second
+
+public test_quick_second_kill_doubles_the_points_shown()
+{
+	g_Second = bench_puppet("quickvictim2")
+	ASSERT(g_Second > 0)
+	bench_puppet_spawn(g_Second, "quick_second_up", 20.0, "respawn")
+}
+
+public quick_second_up(id)
+{
+	Pair("quickkiller", "quickvictim", 0, "quick_ready")
+}
+
+public quick_ready()
+{
+	Kill()
+	bench_wait_until("died", "quick_first", 1.0)
+}
+
+public quick_first()
+{
+	ASSERT(Notice("2 #TS_Frg #TS_FrgFr quickkiller"))
+	g_Victim = g_Second
+	g_DeathKiller = 0
+	set_pev(g_Second, pev_health, 1.0)
+	ExecuteHamB(Ham_TakeDamage, g_Second, g_P[0], g_P[0], 10.0, DMG_BULLET)
+	bench_wait_until("died", "quick_second", 1.0)
+}
+
+public quick_second()
+{
+	ASSERT_EQ(g_DeathKiller, g_P[0])
+	ASSERT(Notice("4 #TS_Frg #TS_FrgFr quickkiller"))
 	bench_pass()
 }
 
