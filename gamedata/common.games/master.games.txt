@@ -21,6 +21,11 @@
 		"engine"  "engine_ls"
 	}
 
+	"globalvars-ts.txt"
+	{
+		"game"  "ts"
+	}
+
 	"functions.engine.txt"
 	{
 		"engine"  "engine_ds"
